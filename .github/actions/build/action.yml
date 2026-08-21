@@ -1,0 +1,67 @@
+name: Build OpenWrt package
+description: Build stunmesh-go with the OpenWrt SDK for one arch/release, sign it, index it, and collect the result
+
+inputs:
+  arch:
+    description: 'OpenWrt package architecture (x86_64, mipsel_24kc, aarch64_cortex-a53, ...)'
+    required: true
+  release:
+    description: 'OpenWrt release tag of the SDK container (openwrt-25.12, SNAPSHOT)'
+    required: true
+  private-key:
+    description: 'PEM private key used to sign the packages and the index (empty = unsigned)'
+    required: false
+    default: ''
+  package:
+    description: 'Package name to build'
+    required: false
+    default: stunmesh-go
+  feedname:
+    description: 'Feed name this repo is registered as in feeds.conf'
+    required: false
+    default: stunmesh
+
+outputs:
+  feed-dir:
+    description: 'Directory holding the feed as apk expects it: packages plus packages.adb, original file names'
+    value: out/feed
+  release-dir:
+    description: 'Directory holding the packages renamed with the release stamped in, for GitHub release assets'
+    value: out/release
+
+runs:
+  using: composite
+  steps:
+    - name: Build with the OpenWrt SDK
+      uses: openwrt/gh-action-sdk@v11
+      env:
+        ARCH: ${{ inputs.arch }}-${{ inputs.release }}
+        FEEDNAME: ${{ inputs.feedname }}
+        PACKAGES: ${{ inputs.package }}
+        PRIVATE_KEY: ${{ inputs.private-key }}
+        INDEX: 1
+        V: s
+
+    - name: Collect packages
+      shell: bash
+      run: |
+        set -eu
+        src="bin/packages/${{ inputs.arch }}/${{ inputs.feedname }}"
+        mkdir -p out/feed out/release
+        found=0
+        for f in "$src"/${{ inputs.package }}*.ipk "$src"/${{ inputs.package }}*.apk; do
+          [ -e "$f" ] || continue
+          b="$(basename "$f")"
+          cp "$f" out/feed/
+          # openwrt/gh-action-sdk writes the same file name for every release,
+          # so stamp the release in to keep release assets distinct.
+          cp "$f" "out/release/${b%.*}_${{ inputs.release }}.${b##*.}"
+          found=1
+        done
+        [ "$found" = 1 ] || { echo "no package produced in $src" >&2; ls -R bin || true; exit 1; }
+        # The index is what apk fetches first; without it the feed is useless.
+        for idx in packages.adb Packages Packages.gz Packages.sig; do
+          [ -e "$src/$idx" ] && cp "$src/$idx" out/feed/
+        done
+        [ -e out/feed/packages.adb ] || [ -e out/feed/Packages ] || { echo "no package index produced in $src" >&2; ls -l "$src"; exit 1; }
+        ls -lR out

@@ -1,0 +1,6 @@
+bin/
+logs/
+
+# signing keys: only the public key lives in keys/
+private-key.pem
+apk-private-key.pem

@@ -1,0 +1,58 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  # Create the draft first so the uploaders below all find the same release
+  # instead of racing to create their own.
+  create-release:
+    name: Create Release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+
+  matrix:
+    name: Discover matrix
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.matrix.outputs.releases }}
+      archs: ${{ steps.matrix.outputs.archs }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: matrix
+        uses: ./.github/actions/matrix
+
+  build:
+    name: ${{ matrix.arch }} ${{ matrix.release }}
+    runs-on: ubuntu-latest
+    needs: [create-release, matrix]
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.matrix.outputs.releases) }}
+        arch: ${{ fromJSON(needs.matrix.outputs.archs) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+        with:
+          arch: ${{ matrix.arch }}
+          release: ${{ matrix.release }}
+          private-key: ${{ secrets.APK_PRIVATE_KEY }}
+      - name: Upload to release
+        uses: softprops/action-gh-release@v3
+        with:
+          draft: true
+          files: |
+            ${{ steps.build.outputs.release-dir }}/*
+            keys/stunmesh.pem

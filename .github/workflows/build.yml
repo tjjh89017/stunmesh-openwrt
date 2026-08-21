@@ -1,0 +1,95 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  matrix:
+    name: Discover matrix
+    runs-on: ubuntu-latest
+    outputs:
+      releases: ${{ steps.matrix.outputs.releases }}
+      archs: ${{ steps.matrix.outputs.archs }}
+    steps:
+      - uses: actions/checkout@v7
+      - id: matrix
+        uses: ./.github/actions/matrix
+
+  build:
+    name: ${{ matrix.arch }} ${{ matrix.release }}
+    needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.matrix.outputs.releases) }}
+        arch: ${{ fromJSON(needs.matrix.outputs.archs) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+        with:
+          arch: ${{ matrix.arch }}
+          release: ${{ matrix.release }}
+          # Empty on pull requests from forks, which then build unsigned.
+          private-key: ${{ secrets.APK_PRIVATE_KEY }}
+      - name: Store feed
+        uses: actions/upload-artifact@v7
+        with:
+          name: feed-${{ matrix.release }}__${{ matrix.arch }}
+          path: ${{ steps.build.outputs.feed-dir }}/
+          if-no-files-found: error
+
+  # Publish every feed directory to GitHub Pages so routers can add
+  # https://<owner>.github.io/stunmesh-openwrt/<release>/<arch>/packages.adb
+  # as a repository. Only from main, so PR builds never touch the feed.
+  feed:
+    name: Publish feed
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v8
+        with:
+          path: feeds
+          pattern: feed-*
+      - name: Assemble site
+        run: |
+          set -eu
+          mkdir -p site
+          cp keys/stunmesh.pem site/stunmesh.pem
+          for d in feeds/feed-*; do
+            n="${d#feeds/feed-}"            # <release>__<arch>
+            rel="${n%%__*}"; arch="${n#*__}"
+            mkdir -p "site/$rel/$arch"
+            cp "$d"/* "site/$rel/$arch/"
+          done
+          {
+            echo '<!doctype html><title>stunmesh-openwrt feed</title><h1>stunmesh-openwrt package feed</h1>'
+            echo '<p>Signing key: <a href="stunmesh.pem">stunmesh.pem</a>. Install instructions: <a href="https://github.com/${{ github.repository }}#readme">README</a>.</p><ul>'
+            find site -name packages.adb -o -name Packages | sort | sed 's|^site/||; s|.*|<li><a href="&">&</a></li>|'
+            echo '</ul>'
+          } > site/index.html
+          find site -type f | sort
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+      - id: deploy
+        uses: actions/deploy-pages@v5

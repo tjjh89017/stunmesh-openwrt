@@ -1,0 +1,60 @@
+name: Discover build matrix
+description: List the OpenWrt releases (stable branches with a published SDK image, plus SNAPSHOT) and architectures to build for
+
+inputs:
+  min-release:
+    description: 'Oldest stable branch to build for'
+    required: false
+    # go.mod requires Go 1.25; 24.10 ships 1.23, so nothing older than this.
+    default: '25.12'
+  token:
+    description: 'GitHub token for listing openwrt/openwrt branches'
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  releases:
+    description: JSON array of SDK release tags (openwrt-25.12, SNAPSHOT, ...)
+    value: ${{ steps.releases.outputs.releases }}
+  archs:
+    description: JSON array of package architectures
+    value: ${{ steps.archs.outputs.archs }}
+
+runs:
+  using: composite
+  steps:
+    - name: Stable branches with a published SDK image
+      id: releases
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.token }}
+        MIN_RELEASE: ${{ inputs.min-release }}
+      run: |
+        set -eu
+        # Stable branches are named openwrt-XX.YY; keep those >= MIN_RELEASE.
+        branches="$(gh api --paginate repos/openwrt/openwrt/branches -q '.[].name' \
+          | grep -E '^openwrt-[0-9]+\.[0-9]+$' | sort -V)"
+        # A branch exists before its SDK container does, so probe ghcr too.
+        tok="$(curl -fsS 'https://ghcr.io/token?scope=repository:openwrt/sdk:pull' | jq -r .token)"
+        have_sdk() {
+          code="$(curl -s -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer $tok" \
+            -H 'Accept: application/vnd.oci.image.index.v1+json, application/vnd.docker.distribution.manifest.list.v2+json, application/vnd.docker.distribution.manifest.v2+json' \
+            "https://ghcr.io/v2/openwrt/sdk/manifests/x86_64-$1")"
+          [ "$code" = 200 ]
+        }
+        releases=""
+        for b in $branches; do
+          v="${b#openwrt-}"
+          [ "$(printf '%s\n%s\n' "$MIN_RELEASE" "$v" | sort -V | head -1)" = "$MIN_RELEASE" ] || continue
+          if have_sdk "$b"; then releases="$releases $b"; else echo "::notice::$b has no SDK image yet, skipping"; fi
+        done
+        releases="$releases SNAPSHOT"
+        json="$(printf '%s\n' $releases | jq -R . | jq -sc .)"
+        echo "releases=$json" | tee -a "$GITHUB_OUTPUT"
+
+    - name: Architectures
+      id: archs
+      shell: bash
+      run: |
+        echo 'archs=["x86_64","aarch64_cortex-a53","aarch64_cortex-a72","aarch64_generic","arm_cortex-a7_neon-vfpv4","arm_cortex-a9_vfpv3-d16","arm_cortex-a15_neon-vfpv4","mipsel_24kc","mips_24kc"]' | tee -a "$GITHUB_OUTPUT"

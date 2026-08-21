@@ -1,0 +1,29 @@
+#!/bin/sh /etc/rc.common
+
+# stunmesh-go reads the WireGuard device once at startup, so start it after
+# netifd has brought the interface up and restart it whenever the interface
+# is recreated or /etc/stunmesh/config.yaml changes.
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/usr/bin/stunmesh-go
+CONFIG=/etc/stunmesh/config.yaml
+
+start_service() {
+	[ -s "$CONFIG" ] || {
+		echo "stunmesh: $CONFIG is missing or empty, not starting" >&2
+		return 1
+	}
+	procd_open_instance
+	procd_set_param command "$PROG" -c "$CONFIG"
+	procd_set_param file "$CONFIG"
+	procd_set_param respawn 3600 5 0
+	procd_set_param stderr 1
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger "network"
+}
