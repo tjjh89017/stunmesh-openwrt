@@ -1,5 +1,5 @@
 name: Build OpenWrt package
-description: Build stunmesh-go with the OpenWrt SDK for one arch/release, sign it, index it, and collect the result
+description: Build stunmesh-go with the OpenWrt SDK for one arch/release, sign it, index it, and collect the feed directory
 
 inputs:
   arch:
@@ -23,11 +23,8 @@ inputs:
 
 outputs:
   feed-dir:
-    description: 'Directory holding the feed as apk expects it: packages plus packages.adb, original file names'
+    description: 'Directory holding the feed as apk expects it: packages plus packages.adb'
     value: out/feed
-  release-dir:
-    description: 'Directory holding the packages renamed with the release stamped in, for GitHub release assets'
-    value: out/release
 
 runs:
   using: composite
@@ -47,15 +44,11 @@ runs:
       run: |
         set -eu
         src="bin/packages/${{ inputs.arch }}/${{ inputs.feedname }}"
-        mkdir -p out/feed out/release
+        mkdir -p out/feed
         found=0
         for f in "$src"/${{ inputs.package }}*.ipk "$src"/${{ inputs.package }}*.apk; do
           [ -e "$f" ] || continue
-          b="$(basename "$f")"
           cp "$f" out/feed/
-          # openwrt/gh-action-sdk writes the same file name for every release,
-          # so stamp the release in to keep release assets distinct.
-          cp "$f" "out/release/${b%.*}_${{ inputs.release }}.${b##*.}"
           found=1
         done
         [ "$found" = 1 ] || { echo "no package produced in $src" >&2; ls -R bin || true; exit 1; }

@@ -34,19 +34,12 @@ available feeds. `apk upgrade` then picks up new versions like any other package
 
 The key fingerprint can be checked against `keys/stunmesh.pem` in this repo.
 
-## Install a prebuilt package by hand
+## Install a single package by hand
 
-Download the `.apk` for your architecture and release from the
-[releases](https://github.com/tjjh89017/stunmesh-openwrt/releases) page
-(`grep OPENWRT_ARCH /etc/os-release` tells you which). The packages are signed
-with the same key, so either install the key as above or skip verification:
-
-```sh
-apk add --allow-untrusted ./stunmesh-go-*.apk
-vi /etc/stunmesh/config.yaml
-service stunmesh enable
-service stunmesh start
-```
+The feed directories are plain files, so a package can also be fetched
+directly from https://tjjh89017.github.io/stunmesh-openwrt/ and installed
+with `apk add ./stunmesh-go-*.apk` (after installing the key as above, or
+with `--allow-untrusted`).
 
 The service restarts itself when `/etc/stunmesh/config.yaml` changes or the
 network is reloaded, since stunmesh-go reads the WireGuard device once at startup.
@@ -69,7 +62,6 @@ keys/stunmesh.pem                     public half of the apk signing key (privat
 .github/actions/build                 composite action: signed SDK build + index for one arch/release
 .github/actions/matrix                composite action: stable branches >= 25.12 with a published SDK image, plus arch list
 .github/workflows/build.yml           CI matrix on push/PR; on main also publishes the feed to Pages
-.github/workflows/release.yml         on v* tag: builds every arch and drafts a release
 ```
 
 ## Updating to a new stunmesh-go release
@@ -81,8 +73,8 @@ curl -sL "https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v<ver>" | sha
 ```
 
 Packaging-only changes (init script, config template) bump `PKG_RELEASE`
-instead. Release tags follow the package version, `v<PKG_VERSION>-<PKG_RELEASE>`,
-so they stay distinct from upstream stunmesh-go tags.
+instead. Every push to `main` rebuilds and republishes the feed; there are no
+separate releases.
 
 ## Signing key
 
