@@ -13,9 +13,29 @@ inputs:
     required: false
     default: ''
   package:
-    description: 'Space-separated package name(s) to build, e.g. "stunmesh-go stunmesh-provisioner".'
+    description: >-
+      Space-separated directory/PKG_NAME value(s) to pass as PACKAGES= to
+      the OpenWrt SDK (what "make package/<X>/download" etc. actually
+      resolve to), e.g. "stunmesh-go stunmesh-provisioner". This is a
+      feed directory name, not necessarily a specific installable package
+      name -- see "select" below when they differ.
     required: false
     default: stunmesh-go
+  select:
+    description: >-
+      Space-separated real package name(s) whose .apk/.ipk output to keep
+      in this action's output. Defaults to "package" (the common case:
+      one directory, one package). Set this separately from "package"
+      when a directory builds more than one installable package (e.g.
+      net/stunmesh-provisioner/Makefile builds both
+      "stunmesh-provisioner" and "stunmesh-provd"): pass the owning
+      directory as "package" so the SDK's PACKAGES= build actually
+      resolves, and the one real package name this build job is
+      responsible for as "select", so its output stays scoped to just
+      that package even though the directory's build also produces its
+      sibling package's .apk alongside it.
+    required: false
+    default: ''
   feedname:
     description: 'Feed name this repo is registered as in feeds.conf'
     required: false
@@ -51,19 +71,24 @@ runs:
 
     - name: Collect packages
       shell: bash
+      env:
+        SELECT: ${{ inputs.select }}
       run: |
         set -eu
         src="bin/packages/${{ inputs.arch }}/${{ inputs.feedname }}"
         mkdir -p out/feed
+        # Default "select" to "package": the common case is one directory
+        # building exactly the one package named the same as itself.
+        select="${SELECT:-${{ inputs.package }}}"
         found=0
-        for pkg in ${{ inputs.package }}; do
+        for pkg in $select; do
           for f in "$src"/"$pkg"*.ipk "$src"/"$pkg"*.apk; do
             [ -e "$f" ] || continue
             cp "$f" out/feed/
             found=1
           done
         done
-        [ "$found" = 1 ] || { echo "no package produced in $src" >&2; ls -R bin || true; exit 1; }
+        [ "$found" = 1 ] || { echo "no package matching '$select' produced in $src" >&2; ls -R bin || true; exit 1; }
         if [ "${{ inputs.index }}" = '1' ]; then
           # The index is what apk fetches first; without it the feed is useless.
           for idx in packages.adb Packages Packages.gz Packages.sig; do

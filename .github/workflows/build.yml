@@ -14,6 +14,7 @@ jobs:
       releases: ${{ steps.matrix.outputs.releases }}
       archs: ${{ steps.matrix.outputs.archs }}
       packages: ${{ steps.matrix.outputs.packages }}
+      package_dirs: ${{ steps.matrix.outputs.package_dirs }}
     steps:
       - uses: actions/checkout@v7
       - id: matrix
@@ -33,19 +34,44 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0
+      # OpenWrt's build system only exposes one top-level
+      # "make package/<X>/..." target per Makefile, named after the
+      # directory it lives in -- not per "define Package/<name>" block.
+      # matrix.package is the real, installable package name (what
+      # gets built into a .apk and what the CI job/artifact is named
+      # after); "dir" is the feed directory that actually builds it,
+      # looked up from the matrix action's package_dirs map. They are
+      # the same string for a directory with only one package (e.g.
+      # stunmesh-go); "dir" differs for stunmesh-provd, which is built
+      # from net/stunmesh-provisioner/Makefile alongside
+      # stunmesh-provisioner itself. See .github/actions/matrix's
+      # "Packages" step and .github/actions/build's "select" input.
+      - name: Resolve package directory
+        id: resolve
+        env:
+          PKG: ${{ matrix.package }}
+          DIRS_JSON: ${{ needs.matrix.outputs.package_dirs }}
+        run: |
+          set -eu
+          dir="$(printf '%s' "$DIRS_JSON" | jq -r --arg n "$PKG" '.[$n]')"
+          [ -n "$dir" ] && [ "$dir" != null ] || { echo "::error::no directory known for package '$PKG'" >&2; exit 1; }
+          echo "dir=$dir" | tee -a "$GITHUB_OUTPUT"
       - name: Build
         id: build
         uses: ./.github/actions/build
         with:
           arch: ${{ matrix.arch }}
           release: ${{ matrix.release }}
-          package: ${{ matrix.package }}
+          package: ${{ steps.resolve.outputs.dir }}
+          select: ${{ matrix.package }}
           # This job builds exactly one package. "make package/index" only
           # ever indexes what got compiled in the same invocation, so a
-          # per-package index here would only ever list this one package.
-          # The "feed" job rebuilds one real, shared, signed index instead,
-          # once every package's .apk for a release/arch has been
-          # collected -- see .github/scripts/reindex.sh.
+          # per-package index here would only ever list this one package
+          # (and, when "dir" builds more than one, it would list whichever
+          # of them happened to run last). The "feed" job rebuilds one
+          # real, shared, signed index instead, once every package's .apk
+          # for a release/arch has been collected -- see
+          # .github/scripts/reindex.sh.
           index: '0'
           # Empty on pull requests from forks, which then build unsigned.
           private-key: ${{ secrets.APK_PRIVATE_KEY }}

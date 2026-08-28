@@ -22,6 +22,12 @@ outputs:
   packages:
     description: JSON array of OpenWrt package names, discovered from every "define Package/<name>" in */*/Makefile
     value: ${{ steps.packages.outputs.packages }}
+  package_dirs:
+    description: >-
+      JSON object mapping each package name to the feed directory (Makefile)
+      that actually builds it -- see the "Packages" step below for why this
+      is not always the package name itself.
+    value: ${{ steps.packages.outputs.package_dirs }}
 
 runs:
   using: composite
@@ -68,19 +74,51 @@ runs:
       run: |
         set -eu
         # A Makefile's own "define Package/<name>...endef" blocks are the
-        # actual OpenWrt package names it builds -- not the directory name.
-        # One Makefile can define more than one package (e.g.
-        # net/stunmesh-provisioner/Makefile defines both
-        # "stunmesh-provisioner" and "stunmesh-provd"), and each such name
-        # is its own buildable/installable unit ("make package/<name>/compile"
-        # resolves it via the feed index, regardless of which directory
-        # holds the Makefile). Matching only the bare
-        # "define Package/<name>" line (no trailing "/description",
-        # "/install", "/conffiles", ...) is what keeps this to real package
-        # names. Discovering this from the tree, instead of a hardcoded
-        # list, means a new package (or a new sub-package in an existing
-        # Makefile) is picked up by CI without editing this workflow.
-        packages="$(grep -horE '^define Package/[A-Za-z0-9_.+-]+$' */*/Makefile 2>/dev/null \
-          | sed -E 's#^define Package/##' | sort -u)"
-        json="$(printf '%s\n' $packages | jq -R . | jq -sc 'map(select(length > 0))')"
-        echo "packages=$json" | tee -a "$GITHUB_OUTPUT"
+        # actual, independently installable OpenWrt package names it
+        # builds -- not the directory name. One Makefile can define more
+        # than one package (e.g. net/stunmesh-provisioner/Makefile defines
+        # both "stunmesh-provisioner" and "stunmesh-provd").
+        #
+        # BUT: OpenWrt's build system only exposes one top-level
+        # "make package/<X>/{download,check,compile}" target per Makefile,
+        # named after the *directory* it lives in (confirmed the hard way:
+        # "make package/stunmesh-provd/download" -> "No rule to make
+        # target", because "scripts/feeds install -f stunmesh-provd"
+        # resolves the request to its owning source directory,
+        # "stunmesh-provisioner", and that is the name every downstream
+        # "package/<X>/..." target actually uses -- both sub-packages'
+        # .apk/.ipk still come out of that one directory's build, gated by
+        # nothing else). So this step emits two things:
+        #   packages:     JSON array of every real package name -- one CI
+        #                 matrix entry, one artifact, one expected name in
+        #                 the shared index, per package.
+        #   package_dirs: JSON object mapping each of those names to the
+        #                 directory that must be passed as PACKAGES= to
+        #                 actually build it. build.yml's "build" job looks
+        #                 this up and passes it to .github/actions/build's
+        #                 "package" input, while the real name goes to
+        #                 that action's "select" input, which is what
+        #                 keeps a build job's own artifact scoped to just
+        #                 its one package even when its directory's build
+        #                 also produces a sibling package's .apk alongside
+        #                 it.
+        #
+        # Matching only the bare "define Package/<name>" line (no trailing
+        # "/description", "/install", "/conffiles", ...) is what keeps
+        # this to real package names. Discovering this from the tree,
+        # instead of a hardcoded list, means a new package (or a new
+        # sub-package in an existing Makefile) is picked up by CI without
+        # editing this workflow.
+        packages_json='[]'
+        dirs_json='{}'
+        for mk in */*/Makefile; do
+          dir="$(basename "$(dirname "$mk")")"
+          names="$(grep -E '^define Package/[A-Za-z0-9_.+-]+$' "$mk" | sed -E 's#^define Package/##')"
+          for name in $names; do
+            packages_json="$(echo "$packages_json" | jq -c --arg n "$name" '. + [$n]')"
+            dirs_json="$(echo "$dirs_json" | jq -c --arg n "$name" --arg d "$dir" '. + {($n): $d}')"
+          done
+        done
+        packages_json="$(echo "$packages_json" | jq -c 'sort')"
+        echo "packages=$packages_json" | tee -a "$GITHUB_OUTPUT"
+        echo "package_dirs=$dirs_json" | tee -a "$GITHUB_OUTPUT"
