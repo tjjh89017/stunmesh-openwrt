@@ -1,5 +1,7 @@
 #!/bin/sh
-# reindex.sh runs inside an OpenWrt SDK container (ghcr.io/openwrt/sdk).
+# reindex.sh runs inside an OpenWrt SDK container (ghcr.io/openwrt/sdk),
+# as root (see build.yml's docker run --user root -- needed to apt-get
+# install this script's own build dependencies below).
 #
 # Why this exists: .github/workflows/build.yml's "build" job now has
 # "package" as its own matrix dimension, so each job builds exactly one
@@ -36,23 +38,65 @@
 #                       in every rebuilt index, from the matrix action's
 #                       "define Package/<name>" discovery.
 #
-# The apk-tools 3.0.5 commands below were confirmed against a real SDK
-# container plus a real .apk pulled from this feed's own GitHub Pages site
-# -- not just inferred from openwrt/openwrt's package/Makefile, which
-# turned out to use a "--sign" flag name this apk-tools version does not
-# have (it is "--sign-key" here; "apk mkndx --help" is the source of
-# truth, not the Makefile):
+# The apk-tools commands below were confirmed against a real .apk pulled
+# from this feed's own GitHub Pages site -- not just inferred from
+# openwrt/openwrt's package/Makefile, which turned out to use a "--sign"
+# flag name apk-tools does not have (it is "--sign-key"; "apk mkndx
+# --help" is the source of truth, not the Makefile):
 #   apk mkndx --allow-untrusted [--sign-key KEYFILE] --output packages.adb *.apk
 #   apk adbdump --format json packages.adb
 #   apk verify --keys-dir DIR packages.adb
+#
+# Why this script builds its own apk-tools instead of using the one baked
+# into the OpenWrt SDK tarball (staging_dir/host/bin/apk, apk-tools
+# 3.0.5): run 33145097157 and 33148529465 both crashed here --
+# "Segmentation fault (core dumped)" from "apk mkndx" on SNAPSHOT's
+# aarch64_cortex-a53 packages, reliably (2 of the retries in
+# 33148529465, on the actual GitHub Actions runner). The exact same
+# three .apk files, the exact same SDK image digest, and a byte-identical
+# SDK tarball (sha256sum matched the failed runs' logs) did NOT crash
+# when reproduced locally -- ruling out a bug in this script's own
+# invocation or in the package files themselves, and pointing at a
+# memory-safety bug whose trigger depends on the machine's allocator/heap
+# state (classic non-deterministic, machine-dependent segfault fingerprint).
+# apk-tools upstream (https://gitlab.alpinelinux.org/alpine/apk-tools)
+# confirms exactly this: commit 7593499e ("adb: validate ADB block size
+# and memory allocation", 2026-08-14) fixes __adb_m_stream() in src/adb.c
+# -- the ADB-block reader mkndx uses to parse each input .apk's own
+# embedded metadata -- which previously called malloc(sz) with an
+# unvalidated, stream-supplied sz and never checked the result for NULL
+# before reading into it. This fix landed after apk-tools-3.0.7
+# (2026-07-28) and is not in any tagged release yet, so no released
+# apk-tools binary (including what the SDK ships) has it.
+APK_TOOLS_COMMIT=0dc269c8dd090c27484314f1aeb6918a7a650761
 
 set -eu
 
-echo "::group::setup.sh (download/extract the SDK)"
-bash setup.sh
+echo "::group::apt-get: apk-tools build dependencies"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq --no-install-recommends \
+	python3-pip ninja-build git ca-certificates pkg-config \
+	libssl-dev zlib1g-dev libzstd-dev >/dev/null
+# Debian bullseye's apt-get meson (0.56.2) is too old (apk-tools needs
+# >=0.64); pip's is current.
+pip3 install --quiet --break-system-packages meson 2>/dev/null || pip3 install --quiet meson
 echo "::endgroup::"
 
-APK="$PWD/staging_dir/host/bin/apk"
+echo "::group::build apk-tools $APK_TOOLS_COMMIT"
+git clone --quiet https://gitlab.alpinelinux.org/alpine/apk-tools.git /tmp/apk-tools
+git -C /tmp/apk-tools checkout --quiet "$APK_TOOLS_COMMIT"
+# Disable everything not needed to run mkndx/adbdump/verify: lua (help
+# text), python bindings, scdoc (manpages), and tests. None of those are
+# installed above, so leaving any of them enabled would fail meson's
+# dependency resolution for no benefit here.
+meson setup /tmp/apk-tools/build /tmp/apk-tools \
+	-Dhelp=disabled -Ddocs=disabled -Dlua=disabled -Dpython=disabled -Dtests=disabled \
+	--buildtype=release >/dev/null
+ninja -C /tmp/apk-tools/build src/apk >/dev/null
+APK=/tmp/apk-tools/build/src/apk
+"$APK" --version
+echo "::endgroup::"
 
 sign_key=""
 if [ -s /private-key.pem ]; then

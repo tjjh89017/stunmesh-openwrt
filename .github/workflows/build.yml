@@ -188,17 +188,21 @@ jobs:
       # here fails this job, and "Assemble site"/deploy-pages never run --
       # a broken or falsely-"signed" feed is never published.
       #
-      # Each reindex attempt is retried a few times: run 33145097157
-      # failed here with "Segmentation fault (core dumped)" from apk
-      # mkndx itself (exit 139). Reproduced locally with the exact same
-      # SDK image digest, the exact same SDK tarball (sha256sum matched
-      # the failed run's log byte for byte), and the exact same three
-      # .apk files downloaded from that run's own artifacts -- and it
-      # completed cleanly. Same binary, same input, different outcome:
-      # not a bug in this script's apk invocation or in the packages
-      # themselves, but a one-off native-tool crash (runner resource
-      # contention, or a rare apk-tools fault) that a retry is the
-      # correct mitigation for, not a code change to the command itself.
+      # Runs the container as root: reindex.sh now apt-get installs its
+      # own build dependencies and builds apk-tools from source (see its
+      # header comment) instead of using the SDK's bundled apk-tools
+      # 3.0.5, which has a memory-safety bug in the ADB-block reader
+      # mkndx uses, fixed upstream after 3.0.5 (and after the latest
+      # tagged release, 3.0.7) but not yet in any release. Runs
+      # 33145097157 and 33148529465 both crashed here on the exact same
+      # cell (SNAPSHOT, aarch64_cortex-a53) with "Segmentation fault
+      # (core dumped)" from apk mkndx (exit 139) -- 33148529465 crashed
+      # on 2 consecutive retries of the *old* apk-tools 3.0.5 path,
+      # which is what disproved this being simple runner flakiness a
+      # retry alone could paper over (see reindex.sh for the full
+      # writeup and the exact upstream commit). The retry loop stays as
+      # a second line of defense for unrelated transient failures (a
+      # flaky apt/git-clone), not as the fix for this crash.
       - name: Rebuild shared index and verify
         env:
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
@@ -213,7 +217,7 @@ jobs:
             echo "::group::Reindex $rel"
             attempt=1
             max_attempts=3
-            until docker run --rm \
+            until docker run --rm --user root \
               -e EXPECTED_PACKAGES \
               -v "$PWD/merged/$rel:/feed" \
               -v "$PWD/private-key.pem:/private-key.pem:ro" \
