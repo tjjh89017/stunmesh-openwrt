@@ -16,24 +16,25 @@ inputs:
     description: >-
       Space-separated directory/PKG_NAME value(s) to pass as PACKAGES= to
       the OpenWrt SDK (what "make package/<X>/download" etc. actually
-      resolve to), e.g. "stunmesh-go stunmesh-provisioner". This is a
-      feed directory name, not necessarily a specific installable package
-      name -- see "select" below when they differ.
+      resolve to), e.g. "stunmesh-go" or "stunmesh-provisioner" (a feed
+      directory name, not necessarily a specific installable package name
+      -- see "select" below when they differ).
     required: false
     default: stunmesh-go
   select:
     description: >-
-      Space-separated real package name(s) whose .apk/.ipk output to keep
-      in this action's output. Defaults to "package" (the common case:
-      one directory, one package). Set this separately from "package"
-      when a directory builds more than one installable package (e.g.
-      net/stunmesh-provisioner/Makefile builds both
-      "stunmesh-provisioner" and "stunmesh-provd"): pass the owning
-      directory as "package" so the SDK's PACKAGES= build actually
-      resolves, and the one real package name this build job is
-      responsible for as "select", so its output stays scoped to just
-      that package even though the directory's build also produces its
-      sibling package's .apk alongside it.
+      Space-separated real package name(s) whose .apk/.ipk output to
+      collect, one subdirectory per name (see "feed-dir" below). Defaults
+      to "package" (the common case: one directory building exactly the
+      one package named the same as itself). Set this separately from
+      "package" when a directory builds more than one installable
+      package (e.g. net/stunmesh-provisioner/Makefile builds both
+      "stunmesh-agent" and "stunmesh-provd"): pass the owning directory as
+      "package" so the SDK's PACKAGES= build actually resolves, and every
+      real package name that directory owns as "select", space-separated
+      -- each is verified to have produced at least one file; a directory
+      that silently dropped one of its own packages fails this action
+      instead of publishing an incomplete set.
     required: false
     default: ''
   feedname:
@@ -53,7 +54,10 @@ inputs:
 
 outputs:
   feed-dir:
-    description: 'Directory holding the built package file(s), plus the index when index=1'
+    description: >-
+      Directory holding one subdirectory per name in "select"
+      (feed-dir/<package>/*.apk, *.ipk), plus the index directly under
+      feed-dir when index=1.
     value: out/feed
 
 runs:
@@ -80,15 +84,26 @@ runs:
         # Default "select" to "package": the common case is one directory
         # building exactly the one package named the same as itself.
         select="${SELECT:-${{ inputs.package }}}"
-        found=0
+        missing=""
         for pkg in $select; do
+          mkdir -p "out/feed/$pkg"
+          found=0
           for f in "$src"/"$pkg"*.ipk "$src"/"$pkg"*.apk; do
             [ -e "$f" ] || continue
-            cp "$f" out/feed/
+            cp "$f" "out/feed/$pkg/"
             found=1
           done
+          # Every name in "select" must produce its own file: a directory
+          # that built fine but silently dropped one of its own packages
+          # (a bad CONFIG_PACKAGE_* selection, a typo) fails loudly here
+          # instead of shipping an incomplete feed.
+          [ "$found" = 1 ] || missing="$missing $pkg"
         done
-        [ "$found" = 1 ] || { echo "no package matching '$select' produced in $src" >&2; ls -R bin || true; exit 1; }
+        if [ -n "$missing" ]; then
+          echo "::error::no package produced in $src for:$missing" >&2
+          ls -R bin || true
+          exit 1
+        fi
         if [ "${{ inputs.index }}" = '1' ]; then
           # The index is what apk fetches first; without it the feed is useless.
           for idx in packages.adb Packages Packages.gz Packages.sig; do

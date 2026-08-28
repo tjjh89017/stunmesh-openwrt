@@ -26,12 +26,13 @@ PKG_BUILD_FLAGS:=no-mips16
 # controller; upstream's own docs say it "is a normal Linux machine, not an
 # OpenWrt router" and ship no OpenWrt integration for it at all). Both are
 # built here as two separate OpenWrt packages from this one Makefile
-# (Package/stunmesh-provisioner and Package/stunmesh-provd, below): some
-# operators want the controller on a router anyway, and whether that
-# actually works well for a given deployment is that operator's call, not
-# something to gatekeep at packaging time. GO_PKG_BUILD_PKG lists both
-# so one Go build step produces both binaries; each package's own
-# install macro then picks only the one binary it ships.
+# (Package/stunmesh-agent and Package/stunmesh-provd, below, each named
+# after the binary it installs): some operators want the controller on a
+# router anyway, and whether that actually works well for a given
+# deployment is that operator's call, not something to gatekeep at
+# packaging time. GO_PKG_BUILD_PKG lists both so one Go build step
+# produces both binaries; each package's own install macro then picks
+# only the one binary it ships.
 GO_PKG:=github.com/tjjh89017/stunmesh-provisioner
 GO_PKG_BUILD_PKG:=$(GO_PKG)/cmd/stunmesh-agent $(GO_PKG)/cmd/stunmesh-provd
 GO_PKG_LDFLAGS_X:=main.version=$(PKG_VERSION)
@@ -39,7 +40,14 @@ GO_PKG_LDFLAGS_X:=main.version=$(PKG_VERSION)
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
 
-define Package/stunmesh-provisioner
+# Named after the binary it ships, stunmesh-agent, not the upstream repo
+# (stunmesh-provisioner) or directory -- consistent with the
+# stunmesh-provd package below, and with how net/stunmesh-go's own
+# package is named after its binary. This package was briefly published
+# under the name "stunmesh-provisioner" (this feed's first release of
+# it); see the note above $(eval $(call BuildPackage,stunmesh-agent))
+# below for why that rename ships with no compatibility shim.
+define Package/stunmesh-agent
   SECTION:=net
   CATEGORY:=Network
   SUBMENU:=VPN
@@ -48,7 +56,7 @@ define Package/stunmesh-provisioner
   DEPENDS:=$(GO_ARCH_DEPENDS) +kmod-wireguard +wireguard-tools +ca-bundle
 endef
 
-define Package/stunmesh-provisioner/description
+define Package/stunmesh-agent/description
   stunmesh-provisioner provisions stunmesh-go nodes on OpenWrt devices from a
   central controller. This package ships stunmesh-agent, the on-device half:
   it fetches an encrypted WireGuard/stunmesh-go config bundle published to
@@ -60,11 +68,11 @@ define Package/stunmesh-provisioner/description
   controller itself is the separate stunmesh-provd package.
 endef
 
-define Package/stunmesh-provisioner/conffiles
+define Package/stunmesh-agent/conffiles
 /etc/config/provd
 endef
 
-define Package/stunmesh-provisioner/install
+define Package/stunmesh-agent/install
 	$(call GoPackage/Package/Install/Bin,$(PKG_INSTALL_DIR))
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/stunmesh-agent $(1)/usr/sbin/stunmesh-agent
@@ -76,8 +84,19 @@ define Package/stunmesh-provisioner/install
 	$(INSTALL_CONF) ./files/provd.config $(1)/etc/config/provd
 endef
 
-$(eval $(call GoBinPackage,stunmesh-provisioner))
-$(eval $(call BuildPackage,stunmesh-provisioner))
+# No PROVIDES/replaces compatibility shim for the earlier
+# "stunmesh-provisioner" package name: this feed published that name for
+# the first time only hours before this rename, so realistically nobody
+# has it installed. apk's PROVIDES exists for virtual/alternative
+# packages satisfying a dependency, not for migrating an already
+# -installed package's own name forward on upgrade (that needs a
+# "replaces" relationship apk does not resolve automatically here
+# either); building that path correctly for one package's few-hour-old
+# name would add untested complexity for near-zero benefit. Anyone who
+# did install "stunmesh-provisioner" in that window can
+# "apk del stunmesh-provisioner && apk add stunmesh-agent" by hand.
+$(eval $(call GoBinPackage,stunmesh-agent))
+$(eval $(call BuildPackage,stunmesh-agent))
 
 define Package/stunmesh-provd
   SECTION:=net

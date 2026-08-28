@@ -20,14 +20,22 @@ outputs:
     description: JSON array of package architectures
     value: ${{ steps.archs.outputs.archs }}
   packages:
-    description: JSON array of OpenWrt package names, discovered from every "define Package/<name>" in */*/Makefile
+    description: JSON array of every OpenWrt package name, discovered from every "define Package/<name>" in */*/Makefile
     value: ${{ steps.packages.outputs.packages }}
-  package_dirs:
+  dirs:
     description: >-
-      JSON object mapping each package name to the feed directory (Makefile)
-      that actually builds it -- see the "Packages" step below for why this
-      is not always the package name itself.
-    value: ${{ steps.packages.outputs.package_dirs }}
+      JSON object mapping each feed directory (Makefile) to the JSON array
+      of package names it builds, e.g.
+      {"stunmesh-go":["stunmesh-go"],"stunmesh-provisioner":["stunmesh-agent","stunmesh-provd"]}.
+      See the "Packages" step below for why a directory can own more than
+      one package.
+    value: ${{ steps.packages.outputs.dirs }}
+  dir_names:
+    description: >-
+      JSON array of the keys of "dirs" above (its own matrix dimension, for
+      the "build" job -- GitHub Actions expressions have no keys() function
+      to derive this from "dirs" itself).
+    value: ${{ steps.packages.outputs.dir_names }}
 
 runs:
   using: composite
@@ -77,7 +85,7 @@ runs:
         # actual, independently installable OpenWrt package names it
         # builds -- not the directory name. One Makefile can define more
         # than one package (e.g. net/stunmesh-provisioner/Makefile defines
-        # both "stunmesh-provisioner" and "stunmesh-provd").
+        # both "stunmesh-agent" and "stunmesh-provd").
         #
         # BUT: OpenWrt's build system only exposes one top-level
         # "make package/<X>/{download,check,compile}" target per Makefile,
@@ -86,22 +94,26 @@ runs:
         # target", because "scripts/feeds install -f stunmesh-provd"
         # resolves the request to its owning source directory,
         # "stunmesh-provisioner", and that is the name every downstream
-        # "package/<X>/..." target actually uses -- both sub-packages'
-        # .apk/.ipk still come out of that one directory's build, gated by
-        # nothing else). So this step emits two things:
-        #   packages:     JSON array of every real package name -- one CI
-        #                 matrix entry, one artifact, one expected name in
-        #                 the shared index, per package.
-        #   package_dirs: JSON object mapping each of those names to the
-        #                 directory that must be passed as PACKAGES= to
-        #                 actually build it. build.yml's "build" job looks
-        #                 this up and passes it to .github/actions/build's
-        #                 "package" input, while the real name goes to
-        #                 that action's "select" input, which is what
-        #                 keeps a build job's own artifact scoped to just
-        #                 its one package even when its directory's build
-        #                 also produces a sibling package's .apk alongside
-        #                 it.
+        # "package/<X>/..." target actually uses). So the CI matrix's own
+        # build dimension must be the *directory*, built exactly once, not
+        # once per package it owns -- building "stunmesh-provisioner"
+        # twice (once "for" each of its two packages) wasted a full SDK
+        # compile for no reason. This step emits:
+        #   packages:   JSON array of every real package name -- what the
+        #               shared index (EXPECTED_PACKAGES in the "feed" job)
+        #               must list, and what each final per-package
+        #               artifact is named after.
+        #   dirs:       JSON object mapping each feed directory to the
+        #               JSON array of package names it builds. The
+        #               "build" job's matrix dimension is a dir; it looks
+        #               up this array to know which packages to pass to
+        #               .github/actions/build's "select" input (which
+        #               .apk/.ipk files to collect and verify out of that
+        #               one directory's one build) and to fan out into
+        #               individually named artifacts afterward.
+        #   dir_names:  JSON array of "dirs"'s own keys, since GitHub
+        #               Actions expressions have no keys() function to
+        #               derive a matrix dimension from "dirs" directly.
         #
         # Matching only the bare "define Package/<name>" line (no trailing
         # "/description", "/install", "/conffiles", ...) is what keeps
@@ -114,11 +126,14 @@ runs:
         for mk in */*/Makefile; do
           dir="$(basename "$(dirname "$mk")")"
           names="$(grep -E '^define Package/[A-Za-z0-9_.+-]+$' "$mk" | sed -E 's#^define Package/##')"
+          names_json="$(printf '%s\n' $names | jq -R . | jq -sc 'map(select(length > 0))')"
+          dirs_json="$(echo "$dirs_json" | jq -c --arg d "$dir" --argjson n "$names_json" '. + {($d): $n}')"
           for name in $names; do
             packages_json="$(echo "$packages_json" | jq -c --arg n "$name" '. + [$n]')"
-            dirs_json="$(echo "$dirs_json" | jq -c --arg n "$name" --arg d "$dir" '. + {($n): $d}')"
           done
         done
         packages_json="$(echo "$packages_json" | jq -c 'sort')"
+        dir_names_json="$(echo "$dirs_json" | jq -c 'keys')"
         echo "packages=$packages_json" | tee -a "$GITHUB_OUTPUT"
-        echo "package_dirs=$dirs_json" | tee -a "$GITHUB_OUTPUT"
+        echo "dirs=$dirs_json" | tee -a "$GITHUB_OUTPUT"
+        echo "dir_names=$dir_names_json" | tee -a "$GITHUB_OUTPUT"

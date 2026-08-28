@@ -14,15 +14,90 @@ jobs:
       releases: ${{ steps.matrix.outputs.releases }}
       archs: ${{ steps.matrix.outputs.archs }}
       packages: ${{ steps.matrix.outputs.packages }}
-      package_dirs: ${{ steps.matrix.outputs.package_dirs }}
+      dirs: ${{ steps.matrix.outputs.dirs }}
+      dir_names: ${{ steps.matrix.outputs.dir_names }}
     steps:
       - uses: actions/checkout@v7
       - id: matrix
         uses: ./.github/actions/matrix
 
+  # One job per (release, arch, feed directory): OpenWrt's build system
+  # only exposes one top-level "make package/<X>/..." target per
+  # Makefile, named after the directory it lives in, not per
+  # "define Package/<name>" block -- building "stunmesh-provisioner"
+  # once here also builds its sibling package "stunmesh-provd", so
+  # matrixing on package names here would (and, before this comment,
+  # did) build that same directory twice per release/arch for no reason.
+  # This job uploads one combined artifact per directory; the "split"
+  # job below re-packages it into the one artifact per *package* the
+  # rest of the pipeline (and the "feed" job's merge/index step) expects.
   build:
-    name: ${{ matrix.package }} ${{ matrix.arch }} ${{ matrix.release }}
+    name: >-
+      ${{ matrix.dir }}
+      (${{ join(fromJSON(needs.matrix.outputs.dirs)[matrix.dir], ', ') }})
+      ${{ matrix.arch }} ${{ matrix.release }}
     needs: matrix
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        release: ${{ fromJSON(needs.matrix.outputs.releases) }}
+        arch: ${{ fromJSON(needs.matrix.outputs.archs) }}
+        dir: ${{ fromJSON(needs.matrix.outputs.dir_names) }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+      - name: Resolve this directory's packages
+        id: resolve
+        env:
+          DIR: ${{ matrix.dir }}
+          DIRS_JSON: ${{ needs.matrix.outputs.dirs }}
+        run: |
+          set -eu
+          packages="$(printf '%s' "$DIRS_JSON" | jq -r --arg d "$DIR" '.[$d] | join(" ")')"
+          [ -n "$packages" ] || { echo "::error::no packages known for dir '$DIR'" >&2; exit 1; }
+          echo "packages=$packages" | tee -a "$GITHUB_OUTPUT"
+      - name: Build
+        id: build
+        uses: ./.github/actions/build
+        with:
+          arch: ${{ matrix.arch }}
+          release: ${{ matrix.release }}
+          package: ${{ matrix.dir }}
+          select: ${{ steps.resolve.outputs.packages }}
+          # This job builds one directory, which may cover more than one
+          # package. "make package/index" only ever indexes what got
+          # compiled in the same invocation, so a per-directory index
+          # here would only ever list this directory's own package(s),
+          # never the whole feed. The "feed" job rebuilds one real,
+          # shared, signed index instead, once every package's .apk for
+          # a release/arch has been collected -- see
+          # .github/scripts/reindex.sh.
+          index: '0'
+          # Empty on pull requests from forks, which then build unsigned.
+          private-key: ${{ secrets.APK_PRIVATE_KEY }}
+      - name: Store directory build
+        uses: actions/upload-artifact@v7
+        with:
+          name: dirbuild-${{ matrix.release }}__${{ matrix.arch }}__${{ matrix.dir }}
+          path: ${{ steps.build.outputs.feed-dir }}/
+          if-no-files-found: error
+
+  # Fans a directory's combined build back out into one artifact per real
+  # package (pkg-<release>__<arch>__<package>), so every job downstream of
+  # this one -- the "feed" job's merge and EXPECTED_PACKAGES logic in
+  # particular -- keeps working against individually named packages and
+  # never needs to know which directory built which. This is deliberately
+  # its own matrix job rather than a loop inside "build": a single
+  # "actions/upload-artifact" step can only publish one artifact, and the
+  # number of packages a directory owns is not known until "build"
+  # actually ran, so producing N independently named artifacts needs
+  # either N static steps (impossible for a dynamic N) or, as here, a
+  # matrix over the flat package list.
+  split:
+    name: ${{ matrix.package }} ${{ matrix.arch }} ${{ matrix.release }}
+    needs: [matrix, build]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -31,55 +106,35 @@ jobs:
         arch: ${{ fromJSON(needs.matrix.outputs.archs) }}
         package: ${{ fromJSON(needs.matrix.outputs.packages) }}
     steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-      # OpenWrt's build system only exposes one top-level
-      # "make package/<X>/..." target per Makefile, named after the
-      # directory it lives in -- not per "define Package/<name>" block.
-      # matrix.package is the real, installable package name (what
-      # gets built into a .apk and what the CI job/artifact is named
-      # after); "dir" is the feed directory that actually builds it,
-      # looked up from the matrix action's package_dirs map. They are
-      # the same string for a directory with only one package (e.g.
-      # stunmesh-go); "dir" differs for stunmesh-provd, which is built
-      # from net/stunmesh-provisioner/Makefile alongside
-      # stunmesh-provisioner itself. See .github/actions/matrix's
-      # "Packages" step and .github/actions/build's "select" input.
-      - name: Resolve package directory
+      - name: Resolve owning directory
         id: resolve
         env:
           PKG: ${{ matrix.package }}
-          DIRS_JSON: ${{ needs.matrix.outputs.package_dirs }}
+          DIRS_JSON: ${{ needs.matrix.outputs.dirs }}
         run: |
           set -eu
-          dir="$(printf '%s' "$DIRS_JSON" | jq -r --arg n "$PKG" '.[$n]')"
-          [ -n "$dir" ] && [ "$dir" != null ] || { echo "::error::no directory known for package '$PKG'" >&2; exit 1; }
+          dir="$(printf '%s' "$DIRS_JSON" | jq -r --arg p "$PKG" 'to_entries[] | select(.value | index($p)) | .key' | head -1)"
+          [ -n "$dir" ] || { echo "::error::no directory owns package '$PKG'" >&2; exit 1; }
           echo "dir=$dir" | tee -a "$GITHUB_OUTPUT"
-      - name: Build
-        id: build
-        uses: ./.github/actions/build
+      - name: Download directory build
+        uses: actions/download-artifact@v8
         with:
-          arch: ${{ matrix.arch }}
-          release: ${{ matrix.release }}
-          package: ${{ steps.resolve.outputs.dir }}
-          select: ${{ matrix.package }}
-          # This job builds exactly one package. "make package/index" only
-          # ever indexes what got compiled in the same invocation, so a
-          # per-package index here would only ever list this one package
-          # (and, when "dir" builds more than one, it would list whichever
-          # of them happened to run last). The "feed" job rebuilds one
-          # real, shared, signed index instead, once every package's .apk
-          # for a release/arch has been collected -- see
-          # .github/scripts/reindex.sh.
-          index: '0'
-          # Empty on pull requests from forks, which then build unsigned.
-          private-key: ${{ secrets.APK_PRIVATE_KEY }}
+          name: dirbuild-${{ matrix.release }}__${{ matrix.arch }}__${{ steps.resolve.outputs.dir }}
+          path: dirbuild
+      - name: Verify this package's files are present
+        run: |
+          set -eu
+          src="dirbuild/${{ matrix.package }}"
+          [ -d "$src" ] && [ -n "$(ls -A "$src" 2>/dev/null)" ] || {
+            echo "::error::no files for package '${{ matrix.package }}' in the ${{ steps.resolve.outputs.dir }} directory build" >&2
+            exit 1
+          }
+          ls -l "$src"
       - name: Store package
         uses: actions/upload-artifact@v7
         with:
           name: pkg-${{ matrix.release }}__${{ matrix.arch }}__${{ matrix.package }}
-          path: ${{ steps.build.outputs.feed-dir }}/
+          path: dirbuild/${{ matrix.package }}/
           if-no-files-found: error
 
   # Publish every feed directory to GitHub Pages so routers can add
@@ -88,7 +143,7 @@ jobs:
   feed:
     name: Publish feed
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: [matrix, build]
+    needs: [matrix, split]
     runs-on: ubuntu-latest
     permissions:
       pages: write
