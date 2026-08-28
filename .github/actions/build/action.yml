@@ -13,17 +13,27 @@ inputs:
     required: false
     default: ''
   package:
-    description: 'Space-separated package name(s) to build, e.g. "stunmesh-go stunmesh-provisioner". Built in one SDK invocation so they land in one shared packages.adb.'
+    description: 'Space-separated package name(s) to build, e.g. "stunmesh-go stunmesh-provisioner".'
     required: false
     default: stunmesh-go
   feedname:
     description: 'Feed name this repo is registered as in feeds.conf'
     required: false
     default: stunmesh
+  index:
+    description: >-
+      Run "make package/index" (and sign it) after building, and collect the
+      resulting packages.adb/Packages* alongside the package files. Set to
+      '0' when this build covers only one package out of several that will
+      share a feed directory: a per-package index would only ever list that
+      one package, and the caller (the "feed" job) rebuilds one combined,
+      signed index across every package instead.
+    required: false
+    default: '1'
 
 outputs:
   feed-dir:
-    description: 'Directory holding the feed as apk expects it: packages plus packages.adb'
+    description: 'Directory holding the built package file(s), plus the index when index=1'
     value: out/feed
 
 runs:
@@ -36,7 +46,7 @@ runs:
         FEEDNAME: ${{ inputs.feedname }}
         PACKAGES: ${{ inputs.package }}
         PRIVATE_KEY: ${{ inputs.private-key }}
-        INDEX: 1
+        INDEX: ${{ inputs.index }}
         V: s
 
     - name: Collect packages
@@ -54,9 +64,11 @@ runs:
           done
         done
         [ "$found" = 1 ] || { echo "no package produced in $src" >&2; ls -R bin || true; exit 1; }
-        # The index is what apk fetches first; without it the feed is useless.
-        for idx in packages.adb Packages Packages.gz Packages.sig; do
-          [ -e "$src/$idx" ] && cp "$src/$idx" out/feed/
-        done
-        [ -e out/feed/packages.adb ] || [ -e out/feed/Packages ] || { echo "no package index produced in $src" >&2; ls -l "$src"; exit 1; }
+        if [ "${{ inputs.index }}" = '1' ]; then
+          # The index is what apk fetches first; without it the feed is useless.
+          for idx in packages.adb Packages Packages.gz Packages.sig; do
+            [ -e "$src/$idx" ] && cp "$src/$idx" out/feed/
+          done
+          [ -e out/feed/packages.adb ] || [ -e out/feed/Packages ] || { echo "no package index produced in $src" >&2; ls -l "$src"; exit 1; }
+        fi
         ls -lR out

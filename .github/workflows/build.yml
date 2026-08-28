@@ -20,7 +20,7 @@ jobs:
         uses: ./.github/actions/matrix
 
   build:
-    name: ${{ matrix.arch }} ${{ matrix.release }}
+    name: ${{ matrix.package }} ${{ matrix.arch }} ${{ matrix.release }}
     needs: matrix
     runs-on: ubuntu-latest
     strategy:
@@ -28,6 +28,7 @@ jobs:
       matrix:
         release: ${{ fromJSON(needs.matrix.outputs.releases) }}
         arch: ${{ fromJSON(needs.matrix.outputs.archs) }}
+        package: ${{ fromJSON(needs.matrix.outputs.packages) }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -38,23 +39,20 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           release: ${{ matrix.release }}
-          # Every discovered package is built in this one SDK invocation, not
-          # one job per package: gh-action-sdk's PACKAGES var accepts a
-          # space-separated list and runs "make package/index" exactly once
-          # at the end, over everything it just compiled -- which is what
-          # produces one packages.adb covering every package in the feed. A
-          # separate matrix job per package would each produce its own
-          # single-package index, and copying those into the same feed
-          # directory would silently clobber each other, leaving only the
-          # last package indexed. See discover matrix job / matrix action's
-          # "Packages" step for how the list is discovered.
-          package: ${{ join(fromJSON(needs.matrix.outputs.packages), ' ') }}
+          package: ${{ matrix.package }}
+          # This job builds exactly one package. "make package/index" only
+          # ever indexes what got compiled in the same invocation, so a
+          # per-package index here would only ever list this one package.
+          # The "feed" job rebuilds one real, shared, signed index instead,
+          # once every package's .apk for a release/arch has been
+          # collected -- see .github/scripts/reindex.sh.
+          index: '0'
           # Empty on pull requests from forks, which then build unsigned.
           private-key: ${{ secrets.APK_PRIVATE_KEY }}
-      - name: Store feed
+      - name: Store package
         uses: actions/upload-artifact@v7
         with:
-          name: feed-${{ matrix.release }}__${{ matrix.arch }}
+          name: pkg-${{ matrix.release }}__${{ matrix.arch }}__${{ matrix.package }}
           path: ${{ steps.build.outputs.feed-dir }}/
           if-no-files-found: error
 
@@ -64,7 +62,7 @@ jobs:
   feed:
     name: Publish feed
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
-    needs: build
+    needs: [matrix, build]
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -79,18 +77,71 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/download-artifact@v8
         with:
-          path: feeds
-          pattern: feed-*
+          path: pkgs
+          pattern: pkg-*
+
+      - name: Merge packages by release/arch
+        run: |
+          set -eu
+          mkdir -p merged
+          for d in pkgs/pkg-*; do
+            n="${d#pkgs/pkg-}"     # "<release>__<arch>__<package>"
+            rel="${n%%__*}"
+            rest="${n#*__}"        # "<arch>__<package>"
+            arch="${rest%%__*}"
+            mkdir -p "merged/$rel/$arch"
+            cp "$d"/* "merged/$rel/$arch/"
+          done
+          find merged -type f | sort
+
+      # Rebuild one real, shared, signed index per release/arch, covering
+      # every package that landed there (each "build" job above built only
+      # one). apk (apk-tools v3) is a host tool -- it runs on the CI
+      # runner's own x86_64 Linux, not on the target device's architecture
+      # -- so one SDK pull per *release*, not per target arch, is enough;
+      # .github/scripts/reindex.sh loops over every arch directory itself.
+      #
+      # This step, not the build jobs, is what can actually break the
+      # feed (a bad apk invocation, a signature that fails to verify), so
+      # it validates its own output before returning success: a failure
+      # here fails this job, and "Assemble site"/deploy-pages never run --
+      # a broken or falsely-"signed" feed is never published.
+      - name: Rebuild shared index and verify
+        env:
+          PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
+          EXPECTED_PACKAGES: ${{ join(fromJSON(needs.matrix.outputs.packages), ' ') }}
+        run: |
+          set -eu
+          printf '%s' "$PRIVATE_KEY" > private-key.pem
+          mkdir -p pubkeys
+          cp keys/stunmesh.pem pubkeys/
+          for rel_dir in merged/*/; do
+            rel="$(basename "$rel_dir")"
+            echo "::group::Reindex $rel"
+            docker run --rm \
+              -e EXPECTED_PACKAGES \
+              -v "$PWD/merged/$rel:/feed" \
+              -v "$PWD/private-key.pem:/private-key.pem:ro" \
+              -v "$PWD/pubkeys:/pubkeys:ro" \
+              -v "$PWD/.github/scripts/reindex.sh:/reindex.sh:ro" \
+              "ghcr.io/openwrt/sdk:x86_64-$rel" \
+              sh /reindex.sh
+            echo "::endgroup::"
+          done
+          rm -f private-key.pem
+
       - name: Assemble site
         run: |
           set -eu
           mkdir -p site
           cp keys/stunmesh.pem site/stunmesh.pem
-          for d in feeds/feed-*; do
-            n="${d#feeds/feed-}"            # <release>__<arch>
-            rel="${n%%__*}"; arch="${n#*__}"
-            mkdir -p "site/$rel/$arch"
-            cp "$d"/* "site/$rel/$arch/"
+          for rel_dir in merged/*/; do
+            rel="$(basename "$rel_dir")"
+            for arch_dir in "$rel_dir"*/; do
+              arch="$(basename "$arch_dir")"
+              mkdir -p "site/$rel/$arch"
+              cp "$arch_dir"* "site/$rel/$arch/"
+            done
           done
           {
             echo '<!doctype html><title>stunmesh-openwrt feed</title><h1>stunmesh-openwrt package feed</h1>'

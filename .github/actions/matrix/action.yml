@@ -20,7 +20,7 @@ outputs:
     description: JSON array of package architectures
     value: ${{ steps.archs.outputs.archs }}
   packages:
-    description: JSON array of package names, discovered from */*/Makefile (e.g. net/stunmesh-go)
+    description: JSON array of OpenWrt package names, discovered from every "define Package/<name>" in */*/Makefile
     value: ${{ steps.packages.outputs.packages }}
 
 runs:
@@ -67,11 +67,20 @@ runs:
       shell: bash
       run: |
         set -eu
-        # Every package lives at <category>/<name>/Makefile (e.g.
-        # net/stunmesh-go, net/stunmesh-provisioner). Discovering this from
-        # the tree, instead of a hardcoded list, means a new package
-        # directory is picked up by CI without editing this workflow.
-        packages="$(find . -mindepth 2 -maxdepth 2 -type d -exec test -e '{}/Makefile' ';' -print \
-          | xargs -n1 basename | sort)"
+        # A Makefile's own "define Package/<name>...endef" blocks are the
+        # actual OpenWrt package names it builds -- not the directory name.
+        # One Makefile can define more than one package (e.g.
+        # net/stunmesh-provisioner/Makefile defines both
+        # "stunmesh-provisioner" and "stunmesh-provd"), and each such name
+        # is its own buildable/installable unit ("make package/<name>/compile"
+        # resolves it via the feed index, regardless of which directory
+        # holds the Makefile). Matching only the bare
+        # "define Package/<name>" line (no trailing "/description",
+        # "/install", "/conffiles", ...) is what keeps this to real package
+        # names. Discovering this from the tree, instead of a hardcoded
+        # list, means a new package (or a new sub-package in an existing
+        # Makefile) is picked up by CI without editing this workflow.
+        packages="$(grep -horE '^define Package/[A-Za-z0-9_.+-]+$' */*/Makefile 2>/dev/null \
+          | sed -E 's#^define Package/##' | sort -u)"
         json="$(printf '%s\n' $packages | jq -R . | jq -sc 'map(select(length > 0))')"
         echo "packages=$json" | tee -a "$GITHUB_OUTPUT"
