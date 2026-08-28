@@ -13,6 +13,7 @@ jobs:
     outputs:
       releases: ${{ steps.matrix.outputs.releases }}
       archs: ${{ steps.matrix.outputs.archs }}
+      packages: ${{ steps.matrix.outputs.packages }}
     steps:
       - uses: actions/checkout@v7
       - id: matrix
@@ -37,6 +38,17 @@ jobs:
         with:
           arch: ${{ matrix.arch }}
           release: ${{ matrix.release }}
+          # Every discovered package is built in this one SDK invocation, not
+          # one job per package: gh-action-sdk's PACKAGES var accepts a
+          # space-separated list and runs "make package/index" exactly once
+          # at the end, over everything it just compiled -- which is what
+          # produces one packages.adb covering every package in the feed. A
+          # separate matrix job per package would each produce its own
+          # single-package index, and copying those into the same feed
+          # directory would silently clobber each other, leaving only the
+          # last package indexed. See discover matrix job / matrix action's
+          # "Packages" step for how the list is discovered.
+          package: ${{ join(fromJSON(needs.matrix.outputs.packages), ' ') }}
           # Empty on pull requests from forks, which then build unsigned.
           private-key: ${{ secrets.APK_PRIVATE_KEY }}
       - name: Store feed

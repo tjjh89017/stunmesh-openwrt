@@ -1,5 +1,5 @@
-name: Build OpenWrt package
-description: Build stunmesh-go with the OpenWrt SDK for one arch/release, sign it, index it, and collect the feed directory
+name: Build OpenWrt packages
+description: Build one or more stunmesh-openwrt packages with the OpenWrt SDK for one arch/release, sign them, index them together, and collect the feed directory
 
 inputs:
   arch:
@@ -13,7 +13,7 @@ inputs:
     required: false
     default: ''
   package:
-    description: 'Package name to build'
+    description: 'Space-separated package name(s) to build, e.g. "stunmesh-go stunmesh-provisioner". Built in one SDK invocation so they land in one shared packages.adb.'
     required: false
     default: stunmesh-go
   feedname:
@@ -46,10 +46,12 @@ runs:
         src="bin/packages/${{ inputs.arch }}/${{ inputs.feedname }}"
         mkdir -p out/feed
         found=0
-        for f in "$src"/${{ inputs.package }}*.ipk "$src"/${{ inputs.package }}*.apk; do
-          [ -e "$f" ] || continue
-          cp "$f" out/feed/
-          found=1
+        for pkg in ${{ inputs.package }}; do
+          for f in "$src"/"$pkg"*.ipk "$src"/"$pkg"*.apk; do
+            [ -e "$f" ] || continue
+            cp "$f" out/feed/
+            found=1
+          done
         done
         [ "$found" = 1 ] || { echo "no package produced in $src" >&2; ls -R bin || true; exit 1; }
         # The index is what apk fetches first; without it the feed is useless.

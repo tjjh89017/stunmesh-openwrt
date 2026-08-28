@@ -19,6 +19,9 @@ outputs:
   archs:
     description: JSON array of package architectures
     value: ${{ steps.archs.outputs.archs }}
+  packages:
+    description: JSON array of package names, discovered from */*/Makefile (e.g. net/stunmesh-go)
+    value: ${{ steps.packages.outputs.packages }}
 
 runs:
   using: composite
@@ -58,3 +61,17 @@ runs:
       shell: bash
       run: |
         echo 'archs=["x86_64","aarch64_cortex-a53","aarch64_cortex-a72","aarch64_generic","arm_cortex-a7_neon-vfpv4","arm_cortex-a9_vfpv3-d16","arm_cortex-a15_neon-vfpv4","mipsel_24kc","mips_24kc"]' | tee -a "$GITHUB_OUTPUT"
+
+    - name: Packages
+      id: packages
+      shell: bash
+      run: |
+        set -eu
+        # Every package lives at <category>/<name>/Makefile (e.g.
+        # net/stunmesh-go, net/stunmesh-provisioner). Discovering this from
+        # the tree, instead of a hardcoded list, means a new package
+        # directory is picked up by CI without editing this workflow.
+        packages="$(find . -mindepth 2 -maxdepth 2 -type d -exec test -e '{}/Makefile' ';' -print \
+          | xargs -n1 basename | sort)"
+        json="$(printf '%s\n' $packages | jq -R . | jq -sc 'map(select(length > 0))')"
+        echo "packages=$json" | tee -a "$GITHUB_OUTPUT"
