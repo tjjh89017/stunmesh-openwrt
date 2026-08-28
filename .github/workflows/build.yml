@@ -187,6 +187,18 @@ jobs:
       # it validates its own output before returning success: a failure
       # here fails this job, and "Assemble site"/deploy-pages never run --
       # a broken or falsely-"signed" feed is never published.
+      #
+      # Each reindex attempt is retried a few times: run 33145097157
+      # failed here with "Segmentation fault (core dumped)" from apk
+      # mkndx itself (exit 139). Reproduced locally with the exact same
+      # SDK image digest, the exact same SDK tarball (sha256sum matched
+      # the failed run's log byte for byte), and the exact same three
+      # .apk files downloaded from that run's own artifacts -- and it
+      # completed cleanly. Same binary, same input, different outcome:
+      # not a bug in this script's apk invocation or in the packages
+      # themselves, but a one-off native-tool crash (runner resource
+      # contention, or a rare apk-tools fault) that a retry is the
+      # correct mitigation for, not a code change to the command itself.
       - name: Rebuild shared index and verify
         env:
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
@@ -199,7 +211,9 @@ jobs:
           for rel_dir in merged/*/; do
             rel="$(basename "$rel_dir")"
             echo "::group::Reindex $rel"
-            docker run --rm \
+            attempt=1
+            max_attempts=3
+            until docker run --rm \
               -e EXPECTED_PACKAGES \
               -v "$PWD/merged/$rel:/feed" \
               -v "$PWD/private-key.pem:/private-key.pem:ro" \
@@ -207,6 +221,16 @@ jobs:
               -v "$PWD/.github/scripts/reindex.sh:/reindex.sh:ro" \
               "ghcr.io/openwrt/sdk:x86_64-$rel" \
               sh /reindex.sh
+            do
+              rc=$?
+              echo "::warning::reindex for $rel failed (exit $rc), attempt $attempt/$max_attempts"
+              if [ "$attempt" -ge "$max_attempts" ]; then
+                echo "::endgroup::"
+                exit "$rc"
+              fi
+              attempt=$((attempt + 1))
+              sleep 5
+            done
             echo "::endgroup::"
           done
           rm -f private-key.pem
