@@ -12,11 +12,9 @@ OpenWrt package feed for two related projects:
     (via OpenDHT/dhtproxy) and applies it through uci/ubus. Upstream tests
     this on OpenWrt.
   - `stunmesh-provd` -- the controller itself. Upstream's own docs say it
-    "is a normal Linux machine, not an OpenWrt router." This package's
-    procd init script comes from upstream's OpenWrt integration
-    (adapted from what this feed originally wrote for it); its UCI config
-    is this feed's own addition, for operators who want to run the
-    controller on a router anyway. It installs disabled.
+    "is a normal Linux machine, not an OpenWrt router"; this package is
+    for operators who want to run it on a router anyway. It installs
+    disabled.
 
 Signed apk feed: **https://tjjh89017.github.io/stunmesh-openwrt/**
 
@@ -128,12 +126,9 @@ net/stunmesh-go/Makefile                          package definition (golang-pac
 net/stunmesh-go/files/stunmesh.init               procd service
 net/stunmesh-go/files/config.yaml                 template installed to /etc/stunmesh/ (conffile)
 net/stunmesh-provisioner/Makefile                 defines two packages, stunmesh-agent and
-                                                   stunmesh-provd (golang-package.mk builds both
-                                                   cmd/stunmesh-agent and cmd/stunmesh-provd in one
-                                                   pass); both packages' init/hotplug scripts are
-                                                   installed straight out of the fetched upstream
-                                                   source tarball (contrib/openwrt/); the UCI config
-                                                   templates below are this feed's own
+                                                   stunmesh-provd; init/hotplug scripts come from
+                                                   the upstream tarball (contrib/openwrt/), UCI
+                                                   config templates below are this feed's own
 net/stunmesh-provisioner/files/stunmesh-agent.config    stunmesh-agent template, /etc/config/stunmesh-agent (conffile)
 net/stunmesh-provisioner/files/stunmesh-provd.config    stunmesh-provd template, /etc/config/stunmesh-provd (conffile)
 keys/stunmesh.pem                     public half of the apk signing key (private half: APK_PRIVATE_KEY secret)
