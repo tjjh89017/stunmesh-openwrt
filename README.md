@@ -12,10 +12,11 @@ OpenWrt package feed for two related projects:
     (via OpenDHT/dhtproxy) and applies it through uci/ubus. Upstream tests
     this on OpenWrt.
   - `stunmesh-provd` -- the controller itself. Upstream's own docs say it
-    "is a normal Linux machine, not an OpenWrt router" and ship no OpenWrt
-    integration for it; this package's init script and UCI config are this
-    feed's own addition for operators who want to run it on a router
-    anyway. It installs disabled.
+    "is a normal Linux machine, not an OpenWrt router." This package's
+    procd init script comes from upstream's OpenWrt integration
+    (adapted from what this feed originally wrote for it); its UCI config
+    is this feed's own addition, for operators who want to run the
+    controller on a router anyway. It installs disabled.
 
 Signed apk feed: **https://tjjh89017.github.io/stunmesh-openwrt/**
 
@@ -60,7 +61,7 @@ stunmesh-agent keygen --identity-key /etc/stunmesh/provd/identity.key
 `keygen` prints this node's identity public key. Send it to the controller
 operator running `stunmesh-provd`; they run `node add` and send back
 `NAMESPACE`, `NODE_ID`, `CONTROLLER_PUBKEY`, and the `DHT_PROXY` list. Fill
-those into `/etc/config/provd` (installed with placeholders and inline
+those into `/etc/config/stunmesh-agent` (installed with placeholders and inline
 instructions), then:
 
 ```sh
@@ -71,7 +72,8 @@ service stunmesh-agent start
 `stunmesh-agent fetch` is not a daemon: `start` runs one fetch in the
 background after `boot_delay` seconds and installs a cron line that repeats
 it every `fetch_interval` minutes, plus a WAN-up hotplug trigger. See
-upstream's `docs/quick-start.md` and `contrib/openwrt/README.md` in
+[`docs/quick-start.md`](docs/quick-start.md) and upstream's
+`contrib/openwrt/README.md` in
 [stunmesh-provisioner](https://github.com/tjjh89017/stunmesh-provisioner)
 for the full walkthrough (controller setup, `wg.yaml`, troubleshooting).
 
@@ -83,10 +85,10 @@ stunmesh-provd --dir /etc/stunmesh/provd init <namespace>
 stunmesh-provd --dir /etc/stunmesh/provd node add <namespace> <node_id>
 ```
 
-Fill `/etc/config/provd_controller` (installed disabled, with inline
+Fill `/etc/config/stunmesh-provd` (installed disabled, with inline
 instructions), then `service stunmesh-provd enable && service stunmesh-provd
 start` runs the republish loop until `service stunmesh-provd stop`. See
-upstream's `docs/quick-start.md` for the full controller walkthrough
+[`docs/quick-start.md`](docs/quick-start.md) for the full controller walkthrough
 (`wg.yaml`, `stunmesh.yaml`, publishing).
 
 ## Install a single package by hand
@@ -128,13 +130,12 @@ net/stunmesh-go/files/config.yaml                 template installed to /etc/stu
 net/stunmesh-provisioner/Makefile                 defines two packages, stunmesh-agent and
                                                    stunmesh-provd (golang-package.mk builds both
                                                    cmd/stunmesh-agent and cmd/stunmesh-provd in one
-                                                   pass); stunmesh-agent's init/hotplug scripts are
+                                                   pass); both packages' init/hotplug scripts are
                                                    installed straight out of the fetched upstream
-                                                   source tarball (contrib/openwrt/), stunmesh-provd's
-                                                   init script and UCI config are this feed's own
-net/stunmesh-provisioner/files/provd.config       stunmesh-agent template, /etc/config/provd (conffile)
-net/stunmesh-provisioner/files/stunmesh-provd.init      stunmesh-provd's procd service (this feed's own)
-net/stunmesh-provisioner/files/provd_controller.config  stunmesh-provd template, /etc/config/provd_controller
+                                                   source tarball (contrib/openwrt/); the UCI config
+                                                   templates below are this feed's own
+net/stunmesh-provisioner/files/stunmesh-agent.config    stunmesh-agent template, /etc/config/stunmesh-agent (conffile)
+net/stunmesh-provisioner/files/stunmesh-provd.config    stunmesh-provd template, /etc/config/stunmesh-provd (conffile)
 keys/stunmesh.pem                     public half of the apk signing key (private half: APK_PRIVATE_KEY secret)
 .github/actions/build                 composite action: SDK build for one arch/release/directory,
                                        signs and collects one subdirectory per package it owns

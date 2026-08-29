@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
 PKG_VERSION:=0.2.1
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
@@ -21,10 +21,11 @@ PKG_BUILD_PARALLEL:=1
 PKG_BUILD_FLAGS:=no-mips16
 
 # stunmesh-provisioner's module has two binaries: cmd/stunmesh-agent (the
-# OpenWrt-side agent, meant to run on the device -- upstream ships tested
-# OpenWrt integration for it, contrib/openwrt/) and cmd/stunmesh-provd (the
-# controller; upstream's own docs say it "is a normal Linux machine, not an
-# OpenWrt router" and ship no OpenWrt integration for it at all). Both are
+# OpenWrt-side agent, meant to run on the device) and cmd/stunmesh-provd
+# (the controller; upstream's own docs say it "is a normal Linux machine,
+# not an OpenWrt router"). Upstream ships tested OpenWrt integration
+# (contrib/openwrt/) for both binaries' init/hotplug scripts; the UCI
+# config templates each package installs are this feed's own. Both are
 # built here as two separate OpenWrt packages from this one Makefile
 # (Package/stunmesh-agent and Package/stunmesh-provd, below, each named
 # after the binary it installs): some operators want the controller on a
@@ -64,12 +65,19 @@ define Package/stunmesh-agent/description
   identity key, and applies it through uci/ubus. stunmesh-agent runs once
   per invocation (cron- and hotplug-driven, not a daemon); it is not useful
   standalone until an operator runs the manual key exchange with a
-  stunmesh-provd controller -- see the upstream docs/quick-start.md. The
+  stunmesh-provd controller -- see this repo's docs/quick-start.md. The
   controller itself is the separate stunmesh-provd package.
 endef
 
+# NOTE: files/stunmesh-agent.config's UCI type ("stunmesh-agent", renamed
+# from "provd") does not yet match what the init/hotplug scripts below
+# read: those still come from the upstream 0.2.1 tarball's
+# contrib/openwrt/, which still loads UCI package "provd". Do not merge
+# this rename until upstream ships a contrib/openwrt/ that reads
+# "stunmesh-agent" and PKG_VERSION here is bumped to that release --
+# see the PR description.
 define Package/stunmesh-agent/conffiles
-/etc/config/provd
+/etc/config/stunmesh-agent
 endef
 
 define Package/stunmesh-agent/install
@@ -81,7 +89,7 @@ define Package/stunmesh-agent/install
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/contrib/openwrt/hotplug-iface $(1)/etc/hotplug.d/iface/95-stunmesh-agent
 	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/provd.config $(1)/etc/config/provd
+	$(INSTALL_CONF) ./files/stunmesh-agent.config $(1)/etc/config/stunmesh-agent
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/stunmesh-agent.upgrade $(1)/lib/upgrade/keep.d/stunmesh-agent
 endef
@@ -115,17 +123,23 @@ define Package/stunmesh-provd/description
   WireGuard/stunmesh-go config bundles to OpenDHT (via dhtproxy) for each
   node's stunmesh-agent to fetch. Upstream's own docs describe the
   controller as meant to run on "a normal Linux machine, not an OpenWrt
-  router," and ship no OpenWrt integration for it (contrast with
-  stunmesh-agent, which upstream does test on OpenWrt). This package is for
-  operators who want to run it on a router anyway; this init script and UCI
-  config are this feed's own addition, not upstream's, and whether the
+  router." This package is for operators who want to run it on a router
+  anyway: its procd init script comes from upstream's contrib/openwrt/
+  (adapted from what this feed originally wrote for it); its UCI config
+  template below is this feed's own, not upstream's. Whether the
   controller performs well on your hardware is your call to make. It
-  installs disabled -- see /etc/config/provd_controller and
-  docs/quick-start.md in stunmesh-provisioner before enabling it.
+  installs disabled -- see /etc/config/stunmesh-provd and
+  docs/quick-start.md in this repo before enabling it.
 endef
 
+# NOTE: like stunmesh-agent above, this package's init script now comes
+# from upstream's contrib/openwrt/stunmesh-provd.init (a parallel
+# stunmesh-provisioner PR adds it there, adapted from this feed's former
+# files/stunmesh-provd.init). The 0.2.1 tarball has no such file. Do not
+# merge this change until upstream ships it and PKG_VERSION here is
+# bumped to that release -- see the PR description.
 define Package/stunmesh-provd/conffiles
-/etc/config/provd_controller
+/etc/config/stunmesh-provd
 endef
 
 define Package/stunmesh-provd/install
@@ -133,15 +147,15 @@ define Package/stunmesh-provd/install
 	$(INSTALL_DIR) $(1)/usr/sbin
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/stunmesh-provd $(1)/usr/sbin/stunmesh-provd
 	$(INSTALL_DIR) $(1)/etc/init.d
-	$(INSTALL_BIN) ./files/stunmesh-provd.init $(1)/etc/init.d/stunmesh-provd
+	$(INSTALL_BIN) $(PKG_BUILD_DIR)/contrib/openwrt/stunmesh-provd.init $(1)/etc/init.d/stunmesh-provd
 	$(INSTALL_DIR) $(1)/etc/config
-	$(INSTALL_CONF) ./files/provd_controller.config $(1)/etc/config/provd_controller
+	$(INSTALL_CONF) ./files/stunmesh-provd.config $(1)/etc/config/stunmesh-provd
 	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
 	$(INSTALL_DATA) ./files/stunmesh-provd.upgrade $(1)/lib/upgrade/keep.d/stunmesh-provd
 endef
 
 # Installed disabled: an operator must provision the tree (stunmesh-provd
-# init / node add) and review /etc/config/provd_controller before this
+# init / node add) and review /etc/config/stunmesh-provd before this
 # should run at all. The default postinst that "$(INSTALL_BIN) ... /etc/
 # init.d/$1" would otherwise generate calls "/etc/init.d/$1 enable" on
 # install; this empty override replaces it with a no-op so the service

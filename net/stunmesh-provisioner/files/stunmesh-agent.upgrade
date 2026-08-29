@@ -1,4 +1,4 @@
 # Keep the whole stunmesh state dir (identity key etc.) across sysupgrade;
 # non-default paths go in /etc/sysupgrade.conf.
-/etc/config/provd
+/etc/config/stunmesh-agent
 /etc/stunmesh
