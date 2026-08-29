@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-go
 PKG_VERSION:=1.13.3
-PKG_RELEASE:=2
+PKG_RELEASE:=3
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v$(PKG_VERSION)?
@@ -57,6 +57,8 @@ define Package/stunmesh-go/install
 	$(INSTALL_BIN) ./files/stunmesh.init $(1)/etc/init.d/stunmesh
 	$(INSTALL_DIR) $(1)/etc/stunmesh
 	$(INSTALL_CONF) ./files/config.yaml $(1)/etc/stunmesh/config.yaml
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/stunmesh-go.upgrade $(1)/lib/upgrade/keep.d/stunmesh-go
 endef
 
 $(eval $(call GoBinPackage,stunmesh-go))

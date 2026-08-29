@@ -1,0 +1,2 @@
+# Kept across sysupgrade (also a conffile; listed here to guarantee it).
+/etc/stunmesh/config.yaml
