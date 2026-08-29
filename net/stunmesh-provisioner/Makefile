@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
-PKG_VERSION:=0.2.1
-PKG_RELEASE:=3
+PKG_VERSION:=0.3.0
+PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=7c071f7e88689cd5692b138e91956f993451032cc882f536e75d234590d885b3
+PKG_HASH:=1d37af6db862342a0032452a8020ec0bcd0a6c44c4d4600b01c1a4e9db4af773
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
@@ -24,10 +24,6 @@ PKG_BUILD_FLAGS:=no-mips16
 # cmd/stunmesh-provd, built as two packages below (Package/stunmesh-agent,
 # Package/stunmesh-provd). GO_PKG_BUILD_PKG lists both so one Go build
 # step produces both; each package's install macro picks its own binary.
-#
-# NOTE: blocked on an upstream release renaming UCI "provd" ->
-# "stunmesh-agent" and adding contrib/openwrt/stunmesh-provd.init; bump
-# PKG_VERSION to that release before merging this branch.
 GO_PKG:=github.com/tjjh89017/stunmesh-provisioner
 GO_PKG_BUILD_PKG:=$(GO_PKG)/cmd/stunmesh-agent $(GO_PKG)/cmd/stunmesh-provd
 GO_PKG_LDFLAGS_X:=main.version=$(PKG_VERSION)
