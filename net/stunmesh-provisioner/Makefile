@@ -6,7 +6,7 @@ include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
 PKG_VERSION:=0.2.1
-PKG_RELEASE:=1
+PKG_RELEASE:=2
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
@@ -82,6 +82,8 @@ define Package/stunmesh-agent/install
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/contrib/openwrt/hotplug-iface $(1)/etc/hotplug.d/iface/95-stunmesh-agent
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/provd.config $(1)/etc/config/provd
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/stunmesh-agent.upgrade $(1)/lib/upgrade/keep.d/stunmesh-agent
 endef
 
 # No PROVIDES/replaces compatibility shim for the earlier
@@ -134,6 +136,8 @@ define Package/stunmesh-provd/install
 	$(INSTALL_BIN) ./files/stunmesh-provd.init $(1)/etc/init.d/stunmesh-provd
 	$(INSTALL_DIR) $(1)/etc/config
 	$(INSTALL_CONF) ./files/provd_controller.config $(1)/etc/config/provd_controller
+	$(INSTALL_DIR) $(1)/lib/upgrade/keep.d
+	$(INSTALL_DATA) ./files/stunmesh-provd.upgrade $(1)/lib/upgrade/keep.d/stunmesh-provd
 endef
 
 # Installed disabled: an operator must provision the tree (stunmesh-provd

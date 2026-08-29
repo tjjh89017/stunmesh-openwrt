@@ -1,0 +1,3 @@
+# Controller state tree (keys) created at runtime; non-default "dir" goes
+# in /etc/sysupgrade.conf.
+/etc/stunmesh/provd
