@@ -1,3 +1,3 @@
-# Runtime-generated identity key under /etc/stunmesh/provd, unknown to the
-# package manager; non-default paths go in /etc/sysupgrade.conf.
-/etc/stunmesh/provd
+# Keep the whole stunmesh state dir (identity key etc.) across sysupgrade;
+# non-default paths go in /etc/sysupgrade.conf.
+/etc/stunmesh
