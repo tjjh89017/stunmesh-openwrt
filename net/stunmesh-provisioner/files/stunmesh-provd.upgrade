@@ -1,4 +1,3 @@
 # Keep the whole stunmesh state dir (controller state tree, keys) across
 # sysupgrade; a non-default "dir" goes in /etc/sysupgrade.conf.
-/etc/config/provd_controller
 /etc/stunmesh
