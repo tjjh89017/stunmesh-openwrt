@@ -1,2 +1,3 @@
-# Kept across sysupgrade (also a conffile; listed here to guarantee it).
-/etc/stunmesh/config.yaml
+# Keep the whole stunmesh state dir across sysupgrade (config.yaml plus
+# anything else operators or tooling drop here).
+/etc/stunmesh
