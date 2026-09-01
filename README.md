@@ -53,27 +53,49 @@ Same key, same feed as above -- just a different package:
 
 ```sh
 apk add stunmesh-agent wireguard-tools kmod-wireguard
-stunmesh-agent keygen --identity-key /etc/stunmesh/provd/identity.key
+stunmesh-agent keygen
 ```
 
-`keygen` prints this node's identity public key. Send it to the controller
-operator running `stunmesh-provd`; they run `node add` and send back
-`NAMESPACE`, `NODE_ID`, `CONTROLLER_PUBKEY`, and the `DHT_PROXY` list. Fill
-those into `/etc/config/stunmesh-agent` (installed with placeholders and inline
-instructions), then:
+`keygen` writes `/etc/stunmesh/agent/identity.key` and prints this node's
+identity public key. Send it to the controller operator running
+`stunmesh-provd`; they run `node add` and send back `NAMESPACE`, `NODE_ID`,
+and `CONTROLLER_PUBKEY`. Fill those into `/etc/config/stunmesh-agent`
+(installed with placeholders and inline instructions), then:
 
 ```sh
 service stunmesh-agent enable
 service stunmesh-agent start
 ```
 
-`stunmesh-agent fetch` is not a daemon: `start` runs one fetch in the
-background after `boot_delay` seconds and installs a cron line that repeats
-it every `fetch_interval` minutes, plus a WAN-up hotplug trigger. See
+`stunmesh-agent` is a procd-supervised daemon, not a cron-driven one-shot
+command: `start` fetches, decrypts, checks, and applies once immediately,
+then ticks on its own `refresh_interval` (default 5m) and
+`full_apply_interval` (default 24h), plus a WAN-up hotplug trigger that
+restarts it. There is no cron integration and no `boot_delay`. See
 [`docs/quick-start.md`](docs/quick-start.md) and upstream's
 `contrib/openwrt/README.md` in
 [stunmesh-provisioner](https://github.com/tjjh89017/stunmesh-provisioner)
 for the full walkthrough (controller setup, `wg.yaml`, troubleshooting).
+
+#### stunmesh-only (the alternative to the daemon above)
+
+`stunmesh-agent` also carries `/usr/share/stunmesh-agent/stunmesh-only.init`,
+a procd service definition for `stunmesh-agent --stunmesh-only` -- the
+embedded stunmesh-go app alone, with no fetch, no DHT, no UCI, no
+`last.json` (see upstream's `contrib/openwrt/README.md`, "Two services, pick
+one"). It is deliberately **not** installed to `/etc/init.d/` and **not**
+enabled by the package: there is no runtime conflict detection between it
+and `stunmesh-agent.init`, and running both starts two stunmesh-go instances
+against the same config file. Enable exactly one of the two, by hand:
+
+```sh
+service stunmesh-agent stop
+service stunmesh-agent disable
+cp /usr/share/stunmesh-agent/stunmesh-only.init /etc/init.d/stunmesh-only
+chmod +x /etc/init.d/stunmesh-only
+service stunmesh-only enable
+service stunmesh-only start
+```
 
 ### stunmesh-provd (the controller, on a router)
 
@@ -99,8 +121,8 @@ with `apk add ./stunmesh-go-*.apk`, `apk add ./stunmesh-agent-*.apk`, or
 
 stunmesh-go's service restarts itself when `/etc/stunmesh/config.yaml`
 changes or the network is reloaded, since it reads the WireGuard device once
-at startup. stunmesh-agent is cron- and hotplug-driven instead, and
-stunmesh-provd is a plain long-running daemon; see above.
+at startup. stunmesh-agent and stunmesh-provd are both procd-supervised
+daemons; see above.
 
 ## Build from the SDK
 
