@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
-PKG_VERSION:=0.3.0
+PKG_VERSION:=0.4.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=1d37af6db862342a0032452a8020ec0bcd0a6c44c4d4600b01c1a4e9db4af773
+PKG_HASH:=0b26b2dda5f0d198fa428fc61ceaf9ca47a9d02065cef69dcaf78c9e704d566b
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
