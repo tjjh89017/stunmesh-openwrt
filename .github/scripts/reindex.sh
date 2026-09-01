@@ -84,7 +84,10 @@ pip3 install --quiet --break-system-packages meson 2>/dev/null || pip3 install -
 echo "::endgroup::"
 
 echo "::group::build apk-tools $APK_TOOLS_COMMIT"
-git clone --quiet https://gitlab.alpinelinux.org/alpine/apk-tools.git /tmp/apk-tools
+# Cloned from the official GitHub mirror, not gitlab.alpinelinux.org
+# directly: that host's own connection kept timing out in CI (run
+# 33460943658), breaking the "Publish feed" job.
+git clone --quiet https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
 git -C /tmp/apk-tools checkout --quiet "$APK_TOOLS_COMMIT"
 # Disable everything not needed to run mkndx/adbdump/verify: lua (help
 # text), python bindings, scdoc (manpages), and tests. None of those are
