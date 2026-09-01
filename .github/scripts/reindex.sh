@@ -67,8 +67,8 @@
 # unvalidated, stream-supplied sz and never checked the result for NULL
 # before reading into it. This fix landed after apk-tools-3.0.7
 # (2026-07-28) and is not in any tagged release yet, so no released
-# apk-tools binary (including what the SDK ships) has it.
-APK_TOOLS_COMMIT=0dc269c8dd090c27484314f1aeb6918a7a650761
+# apk-tools binary (including what the SDK ships) has it. Build master
+# HEAD (no pinned commit) until a release contains the fix.
 
 set -eu
 
@@ -83,12 +83,11 @@ apt-get install -y -qq --no-install-recommends \
 pip3 install --quiet --break-system-packages meson 2>/dev/null || pip3 install --quiet meson
 echo "::endgroup::"
 
-echo "::group::build apk-tools $APK_TOOLS_COMMIT"
+echo "::group::build apk-tools (master)"
 # Cloned from the official GitHub mirror, not gitlab.alpinelinux.org
 # directly: that host's own connection kept timing out in CI (run
 # 33460943658), breaking the "Publish feed" job.
-git clone --quiet https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
-git -C /tmp/apk-tools checkout --quiet "$APK_TOOLS_COMMIT"
+git clone --quiet --depth 1 https://github.com/alpinelinux/apk-tools.git /tmp/apk-tools
 # Disable everything not needed to run mkndx/adbdump/verify: lua (help
 # text), python bindings, scdoc (manpages), and tests. None of those are
 # installed above, so leaving any of them enabled would fail meson's
