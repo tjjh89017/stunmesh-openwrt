@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
-PKG_VERSION:=0.4.0
+PKG_VERSION:=0.5.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=0b26b2dda5f0d198fa428fc61ceaf9ca47a9d02065cef69dcaf78c9e704d566b
+PKG_HASH:=bdc68af13771d9e3b4c5901e7fe1fbfcd0cf1faea04595e9d6866a31ee8ceaef
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
@@ -46,11 +46,17 @@ define Package/stunmesh-agent/description
   central controller. This package ships stunmesh-agent, the on-device half:
   it fetches an encrypted WireGuard/stunmesh-go config bundle published to
   OpenDHT (via dhtproxy) by the controller, decrypts it with this node's
-  identity key, and applies it through uci/ubus. stunmesh-agent runs once
-  per invocation (cron- and hotplug-driven, not a daemon); it is not useful
-  standalone until an operator runs the manual key exchange with a
-  stunmesh-provd controller -- see this repo's docs/quick-start.md. The
-  controller itself is the separate stunmesh-provd package.
+  identity key, and applies it through uci/ubus. stunmesh-agent is a
+  long-running procd daemon (no cron integration): it fetches, decrypts,
+  checks, and applies once at start, then ticks on its own refresh_interval
+  and full_apply_interval; it is not useful standalone until an operator
+  runs the manual key exchange with a stunmesh-provd controller -- see this
+  repo's docs/quick-start.md. The alternative to running this daemon is
+  /usr/share/stunmesh-agent/stunmesh-only.init, a procd service definition
+  for `stunmesh-agent --stunmesh-only` that this package also carries but
+  does not install to /etc/init.d/ or enable -- see README.md in this feed
+  for how to activate it by hand. The controller itself is the separate
+  stunmesh-provd package.
 endef
 
 define Package/stunmesh-agent/conffiles
@@ -63,6 +69,15 @@ define Package/stunmesh-agent/install
 	$(INSTALL_BIN) $(PKG_INSTALL_DIR)/usr/bin/stunmesh-agent $(1)/usr/sbin/stunmesh-agent
 	$(INSTALL_DIR) $(1)/etc/init.d
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/contrib/openwrt/stunmesh-agent.init $(1)/etc/init.d/stunmesh-agent
+	# stunmesh-only.init is carried here, not installed to /etc/init.d/:
+	# default_postinst enables and starts every /etc/init.d/ script a
+	# package installs, and there is no runtime conflict detection
+	# between this service and stunmesh-agent.init above (both would
+	# run an embedded stunmesh-go against the same config), so opt-in
+	# must stay fully manual. See README.md "stunmesh-only" for the
+	# copy-enable-start steps an operator runs by hand.
+	$(INSTALL_DIR) $(1)/usr/share/stunmesh-agent
+	$(INSTALL_DATA) $(PKG_BUILD_DIR)/contrib/openwrt/stunmesh-only.init $(1)/usr/share/stunmesh-agent/stunmesh-only.init
 	$(INSTALL_DIR) $(1)/etc/hotplug.d/iface
 	$(INSTALL_BIN) $(PKG_BUILD_DIR)/contrib/openwrt/hotplug-iface $(1)/etc/hotplug.d/iface/95-stunmesh-agent
 	$(INSTALL_DIR) $(1)/etc/config
