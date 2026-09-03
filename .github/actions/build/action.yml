@@ -81,7 +81,7 @@ runs:
 
     - name: Cache the Go bootstrap toolchain tarball
       id: gobootstrap-cache
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: ${{ runner.temp }}/go-bootstrap-${{ steps.gobootstrap.outputs.version }}.tar.gz
         key: go-bootstrap-${{ steps.gobootstrap.outputs.version }}-linux-amd64
