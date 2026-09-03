@@ -1,16 +1,7 @@
 #!/bin/bash
 
-# Vendored from openwrt/gh-action-sdk@v11 entrypoint.sh (MIT), with one
-# patch: after the first "make defconfig", point the golang-bootstrap
-# package at a prebuilt host Go instead of building go1.4 -> 1.17 -> 1.20
-# -> 1.22 -> 1.24 from source. gh-action-sdk offers no hook to change
-# .config before its own build runs, so this image wraps its entrypoint
-# instead of using the action directly. Re-sync this file by hand when
-# bumping the gh-action-sdk version pin in action.yml.
-#
-# The build step that runs this image mounts the extracted, checksum-
-# verified Go release tarball read-only at /go-bootstrap. When that mount
-# is absent, this script behaves exactly like upstream.
+# Vendored from openwrt/gh-action-sdk@v11 entrypoint.sh (MIT), plus one
+# patch block below. Re-sync by hand when the action version is bumped.
 
 set -ef
 
@@ -77,31 +68,8 @@ group "feeds update -a"
 ./scripts/feeds update -a
 endgroup
 
-# --- stunmesh-openwrt patch: skip the golang-bootstrap chain -----------
-# CONFIG_GOLANG_BUILD_BOOTSTRAP=n makes lang/golang/golang-bootstrap's
-# host-compile a no-op, and lang/golang/golang-version.mk then bootstraps
-# the final host Go straight from CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT
-# instead of the go1.4 -> ... -> go1.24 chain. See PLAN notes in
-# .github/actions/build/action.yml for the verified mechanism. Both
-# symbols live in lang/golang's own top-level "Configuration" menu
-# (Config.in), with no "depends on" clause, so they are always visible
-# to Kconfig regardless of which packages are selected.
-#
-# Placement: seed .config with these two lines BEFORE the one and only
-# "make defconfig" call, instead of appending them after it. A first
-# trial appended them after "make defconfig" and then ran a *second*
-# "make defconfig" -- that second call resets .config from Config.in
-# defaults and threw the override away, so the full go1.4/1.17/1.20/1.22
-# chain still downloaded and built. Seeding before the single defconfig
-# call avoids relying on "never run defconfig again": defconfig's own
-# syncconfig pass sees an already-satisfied answer for both symbols and
-# keeps it, the same way it keeps any other answer already in .config.
-# The lines are re-asserted with sed right after, belt-and-suspenders,
-# in case a later step (a Kconfig-dependent package selection change
-# from "feeds install", for instance) forces an incremental resync --
-# OpenWrt's toplevel.mk reruns "conf --syncconfig" automatically when a
-# Config.in file is newer than .config (see the ".config:" rule and
-# "prepare-tmpinfo" in include/toplevel.mk).
+# stunmesh-openwrt patch: seed the golang-bootstrap override before
+# defconfig, since defconfig's own syncconfig pass otherwise resets it.
 if [ -d /go-bootstrap ]; then
 	group "seed golang-bootstrap override before defconfig"
 	{
@@ -110,12 +78,13 @@ if [ -d /go-bootstrap ]; then
 	} >> .config
 	endgroup
 fi
-# ------------------------------------------------------------------------
 
 group "make defconfig"
 make defconfig
 endgroup
 
+# Re-asserted here because a later "feeds install" can force an
+# incremental syncconfig that resets it again.
 if [ -d /go-bootstrap ]; then
 	group "re-assert golang-bootstrap override after defconfig"
 	sed -i \

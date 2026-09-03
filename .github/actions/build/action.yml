@@ -63,40 +63,14 @@ outputs:
 runs:
   using: composite
   steps:
-    # Every build job used to spend 20+ minutes in golang-bootstrap/host
-    # (go1.4 -> 1.17 -> 1.20 -> 1.22 -> 1.24, built from source) plus
-    # 6-9 more compiling the final host golang1.26/golang1.27, because
-    # openwrt/packages' lang/golang always builds its own bootstrap chain
-    # unless CONFIG_GOLANG_BUILD_BOOTSTRAP=n. With that set,
-    # lang/golang/golang-bootstrap's host-compile is a no-op and
-    # lang/golang/golang-version.mk bootstraps the final host Go straight
-    # from CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT:
-    #
-    #   ifeq ($(CONFIG_GOLANG_BUILD_BOOTSTRAP),y)
-    #     BOOTSTRAP_DIR:=$(HOST_GO_PREFIX)/lib/go-$(GO_BOOTSTRAP_VERSION)
-    #   else
-    #     BOOTSTRAP_DIR:=$(call qstrip,$(CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT))
-    #   endif
-    #   ...
-    #   define Host/Compile
-    #     $(call GoCompiler/$(HOST_GO_PROFILE_ID)/Make, \
-    #       GOROOT_BOOTSTRAP="$(BOOTSTRAP_DIR)" \
-    #       ...
+    # This step drives the SDK container directly, via the vendored
+    # wrapper in .github/docker/openwrt-sdk-bootstrap, because
+    # openwrt/gh-action-sdk gives no hook to edit .config before its
+    # internal "make defconfig" + build run.
     #
     # go1.24.13 is the exact version openwrt/packages' own bootstrap
     # chain currently ends on, so it is a known-good bootstrap toolchain
-    # for both golang1.26 and golang1.27 (Go's own minimum bootstrap
-    # requirement for the 1.27 branch is go1.24.6).
-    #
-    # openwrt/gh-action-sdk gives no hook to edit .config before its
-    # single internal "make defconfig" + build run, so this step drives
-    # the same SDK container directly instead of through that action,
-    # using a small wrapper entrypoint (.github/docker/openwrt-sdk-bootstrap)
-    # vendored from gh-action-sdk@v11 with one patch: after "make
-    # defconfig", set CONFIG_GOLANG_BUILD_BOOTSTRAP=n and
-    # CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT to a prebuilt Go mounted
-    # read-only at /go-bootstrap. Trade-off: this vendored entrypoint
-    # must be re-synced by hand on a future gh-action-sdk version bump.
+    # for both golang1.26 and golang1.27.
     - name: Pin the Go bootstrap toolchain version
       id: gobootstrap
       shell: bash
