@@ -63,15 +63,142 @@ outputs:
 runs:
   using: composite
   steps:
-    - name: Build with the OpenWrt SDK
-      uses: openwrt/gh-action-sdk@v11
+    # Every build job used to spend 20+ minutes in golang-bootstrap/host
+    # (go1.4 -> 1.17 -> 1.20 -> 1.22 -> 1.24, built from source) plus
+    # 6-9 more compiling the final host golang1.26/golang1.27, because
+    # openwrt/packages' lang/golang always builds its own bootstrap chain
+    # unless CONFIG_GOLANG_BUILD_BOOTSTRAP=n. With that set,
+    # lang/golang/golang-bootstrap's host-compile is a no-op and
+    # lang/golang/golang-version.mk bootstraps the final host Go straight
+    # from CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT:
+    #
+    #   ifeq ($(CONFIG_GOLANG_BUILD_BOOTSTRAP),y)
+    #     BOOTSTRAP_DIR:=$(HOST_GO_PREFIX)/lib/go-$(GO_BOOTSTRAP_VERSION)
+    #   else
+    #     BOOTSTRAP_DIR:=$(call qstrip,$(CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT))
+    #   endif
+    #   ...
+    #   define Host/Compile
+    #     $(call GoCompiler/$(HOST_GO_PROFILE_ID)/Make, \
+    #       GOROOT_BOOTSTRAP="$(BOOTSTRAP_DIR)" \
+    #       ...
+    #
+    # go1.24.13 is the exact version openwrt/packages' own bootstrap
+    # chain currently ends on, so it is a known-good bootstrap toolchain
+    # for both golang1.26 and golang1.27 (Go's own minimum bootstrap
+    # requirement for the 1.27 branch is go1.24.6).
+    #
+    # openwrt/gh-action-sdk gives no hook to edit .config before its
+    # single internal "make defconfig" + build run, so this step drives
+    # the same SDK container directly instead of through that action,
+    # using a small wrapper entrypoint (.github/docker/openwrt-sdk-bootstrap)
+    # vendored from gh-action-sdk@v11 with one patch: after "make
+    # defconfig", set CONFIG_GOLANG_BUILD_BOOTSTRAP=n and
+    # CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT to a prebuilt Go mounted
+    # read-only at /go-bootstrap. Trade-off: this vendored entrypoint
+    # must be re-synced by hand on a future gh-action-sdk version bump.
+    - name: Pin the Go bootstrap toolchain version
+      id: gobootstrap
+      shell: bash
+      run: |
+        set -eu
+        echo "version=1.24.13" >> "$GITHUB_OUTPUT"
+        echo "sha256=1fc94b57134d51669c72173ad5d49fd62afb0f1db9bf3f798fd98ee423f8d730" >> "$GITHUB_OUTPUT"
+
+    - name: Cache the Go bootstrap toolchain tarball
+      id: gobootstrap-cache
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/go-bootstrap-${{ steps.gobootstrap.outputs.version }}.tar.gz
+        key: go-bootstrap-${{ steps.gobootstrap.outputs.version }}-linux-amd64
+
+    - name: Download the Go bootstrap toolchain
+      if: steps.gobootstrap-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        GO_VERSION: ${{ steps.gobootstrap.outputs.version }}
+      run: |
+        set -eu
+        curl -fsSL -o "${{ runner.temp }}/go-bootstrap-$GO_VERSION.tar.gz" \
+          "https://go.dev/dl/go$GO_VERSION.linux-amd64.tar.gz"
+
+    - name: Verify and extract the Go bootstrap toolchain
+      shell: bash
+      env:
+        GO_VERSION: ${{ steps.gobootstrap.outputs.version }}
+        GO_SHA256: ${{ steps.gobootstrap.outputs.sha256 }}
+      run: |
+        set -eu
+        tarball="${{ runner.temp }}/go-bootstrap-$GO_VERSION.tar.gz"
+        echo "$GO_SHA256  $tarball" | sha256sum -c -
+        rm -rf "${{ runner.temp }}/go-bootstrap"
+        mkdir -p "${{ runner.temp }}/go-bootstrap"
+        # The release tarball's one top-level "go" directory becomes the
+        # GOROOT that CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT points at.
+        tar -C "${{ runner.temp }}/go-bootstrap" --strip-components=1 -xzf "$tarball"
+
+    - name: Set up Docker QEMU
+      uses: docker/setup-qemu-action@v4
+
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v4
+
+    - name: Build SDK image with the prebuilt Go bootstrap entrypoint
+      uses: docker/build-push-action@v7
       env:
         ARCH: ${{ inputs.arch }}-${{ inputs.release }}
+        DOCKER_BUILD_SUMMARY: false
+      with:
+        push: false
+        tags: sdk-bootstrap
+        context: ${{ github.action_path }}/../../docker/openwrt-sdk-bootstrap
+        build-args: |
+          ARCH
+        cache-to: type=gha,mode=max,scope=stunmesh-openwrt-sdk-bootstrap-${{ inputs.arch }}-${{ inputs.release }}
+        cache-from: type=gha,scope=stunmesh-openwrt-sdk-bootstrap-${{ inputs.arch }}-${{ inputs.release }}
+        load: true
+
+    # gh-action-sdk itself does this chown dance around its docker run:
+    # the container's build user needs to own the checked-out feed (also
+    # used as the artifacts dir) to write into it, and a later step must
+    # give it back to the runner user so following steps can touch it.
+    - name: chown the feed for the SDK container's build user
+      shell: bash
+      run: sudo chown -R 1000:1000 "$GITHUB_WORKSPACE"
+
+    - name: Build with the OpenWrt SDK
+      shell: bash
+      env:
         FEEDNAME: ${{ inputs.feedname }}
         PACKAGES: ${{ inputs.package }}
         PRIVATE_KEY: ${{ inputs.private-key }}
         INDEX: ${{ inputs.index }}
         V: s
+      run: |
+        set -eu
+        docker run --rm \
+          --env BUILD \
+          --env BUILD_LOG \
+          --env EXTRA_FEEDS \
+          --env FEEDNAME \
+          --env IGNORE_ERRORS \
+          --env KEY_BUILD \
+          --env PRIVATE_KEY \
+          --env NO_DEFAULT_FEEDS \
+          --env NO_REFRESH_CHECK \
+          --env NO_SHFMT_CHECK \
+          --env PACKAGES \
+          --env INDEX \
+          --env V \
+          -v "$GITHUB_WORKSPACE:/artifacts" \
+          -v "$GITHUB_WORKSPACE:/feed" \
+          -v "${{ runner.temp }}/go-bootstrap:/go-bootstrap:ro" \
+          sdk-bootstrap
+
+    - name: Restore feed ownership
+      if: always()
+      shell: bash
+      run: sudo chown -R --reference="$GITHUB_WORKSPACE/.." "$GITHUB_WORKSPACE"
 
     - name: Collect packages
       shell: bash
