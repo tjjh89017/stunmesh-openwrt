@@ -1,7 +1,9 @@
 #!/bin/sh
-# reindex.sh runs inside an OpenWrt SDK container (ghcr.io/openwrt/sdk),
-# as root (see build.yml's docker run --user root -- needed to apt-get
-# install this script's own build dependencies below).
+# reindex.sh runs inside a plain debian:trixie-slim container, as root
+# (see build.yml's docker run --user root -- needed to apt-get install
+# this script's own build dependencies below). It needs no OpenWrt SDK
+# tool: every dependency below comes from apt, and apk-tools is built
+# from source (see the next comment block).
 #
 # Why this exists: .github/workflows/build.yml's "build" job now has
 # "package" as its own matrix dimension, so each job builds exactly one
@@ -15,10 +17,10 @@
 #
 # apk (apk-tools v3) is a host tool: it runs on the CI runner's own
 # x86_64 Linux, not on the target device's architecture, so this script
-# does not need a different SDK container per target arch -- one SDK pull
-# per *release* handles every arch built for that release. The caller
-# (build.yml's "feed" job) invokes this once per release, with every
-# target arch's merged package directory bind-mounted under /feed.
+# does not need a different container per target arch -- one container
+# pull per *release* handles every arch built for that release. The
+# caller (build.yml's "feed" job) invokes this once per release, with
+# every target arch's merged package directory bind-mounted under /feed.
 #
 # Inputs, bind-mounted or passed as env by the caller:
 #   /feed/<arch>/*.apk  every package's .apk for one release, one directory
@@ -47,9 +49,9 @@
 #   apk adbdump --format json packages.adb
 #   apk verify --keys-dir DIR packages.adb
 #
-# Why this script builds its own apk-tools instead of using the one baked
-# into the OpenWrt SDK tarball (staging_dir/host/bin/apk, apk-tools
-# 3.0.5): run 33145097157 and 33148529465 both crashed here --
+# Why this script builds its own apk-tools instead of using a released
+# one (apk-tools 3.0.5, 3.0.7): run 33145097157 and 33148529465 both
+# crashed here --
 # "Segmentation fault (core dumped)" from "apk mkndx" on SNAPSHOT's
 # aarch64_cortex-a53 packages, reliably (2 of the retries in
 # 33148529465, on the actual GitHub Actions runner). The exact same
@@ -66,9 +68,8 @@
 # embedded metadata -- which previously called malloc(sz) with an
 # unvalidated, stream-supplied sz and never checked the result for NULL
 # before reading into it. This fix landed after apk-tools-3.0.7
-# (2026-07-28) and is not in any tagged release yet, so no released
-# apk-tools binary (including what the SDK ships) has it. Build master
-# HEAD (no pinned commit) until a release contains the fix.
+# (2026-07-28) and is not in any tagged release yet. Build master HEAD
+# (no pinned commit) until a release contains the fix.
 
 set -eu
 
@@ -76,11 +77,8 @@ echo "::group::apt-get: apk-tools build dependencies"
 export DEBIAN_FRONTEND=noninteractive
 apt-get update -qq
 apt-get install -y -qq --no-install-recommends \
-	python3-pip ninja-build git ca-certificates pkg-config \
+	gcc libc6-dev meson ninja-build git ca-certificates pkg-config \
 	libssl-dev zlib1g-dev libzstd-dev >/dev/null
-# Debian bullseye's apt-get meson (0.56.2) is too old (apk-tools needs
-# >=0.64); pip's is current.
-pip3 install --quiet --break-system-packages meson 2>/dev/null || pip3 install --quiet meson
 echo "::endgroup::"
 
 echo "::group::build apk-tools (master)"

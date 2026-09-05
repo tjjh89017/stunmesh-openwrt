@@ -178,8 +178,9 @@ jobs:
       # every package that landed there (each "build" job above built only
       # one). apk (apk-tools v3) is a host tool -- it runs on the CI
       # runner's own x86_64 Linux, not on the target device's architecture
-      # -- so one SDK pull per *release*, not per target arch, is enough;
-      # .github/scripts/reindex.sh loops over every arch directory itself.
+      # -- so one container pull per *release*, not per target arch, is
+      # enough; .github/scripts/reindex.sh loops over every arch directory
+      # itself.
       #
       # This step, not the build jobs, is what can actually break the
       # feed (a bad apk invocation, a signature that fails to verify), so
@@ -187,21 +188,14 @@ jobs:
       # here fails this job, and "Assemble site"/deploy-pages never run --
       # a broken or falsely-"signed" feed is never published.
       #
-      # Runs the container as root: reindex.sh now apt-get installs its
-      # own build dependencies and builds apk-tools from source (see its
-      # header comment) instead of using the SDK's bundled apk-tools
-      # 3.0.5, which has a memory-safety bug in the ADB-block reader
-      # mkndx uses, fixed upstream after 3.0.5 (and after the latest
-      # tagged release, 3.0.7) but not yet in any release. Runs
-      # 33145097157 and 33148529465 both crashed here on the exact same
-      # cell (SNAPSHOT, aarch64_cortex-a53) with "Segmentation fault
-      # (core dumped)" from apk mkndx (exit 139) -- 33148529465 crashed
-      # on 2 consecutive retries of the *old* apk-tools 3.0.5 path,
-      # which is what disproved this being simple runner flakiness a
-      # retry alone could paper over (see reindex.sh for the full
-      # writeup and the exact upstream commit). The retry loop stays as
-      # a second line of defense for unrelated transient failures (a
-      # flaky apt/git-clone), not as the fix for this crash.
+      # Runs the container as root: reindex.sh apt-get installs its own
+      # build dependencies and builds apk-tools from source (see its
+      # header comment) because every released apk-tools, including
+      # 3.0.5 and 3.0.7, has a memory-safety bug in the ADB-block reader
+      # mkndx uses, fixed upstream but not yet in a tagged release. The
+      # retry loop below stays as a second line of defense for unrelated
+      # transient failures (a flaky apt/git-clone), not as the fix for
+      # that bug.
       - name: Rebuild shared index and verify
         env:
           PRIVATE_KEY: ${{ secrets.APK_PRIVATE_KEY }}
@@ -222,7 +216,7 @@ jobs:
               -v "$PWD/private-key.pem:/private-key.pem:ro" \
               -v "$PWD/pubkeys:/pubkeys:ro" \
               -v "$PWD/.github/scripts/reindex.sh:/reindex.sh:ro" \
-              "ghcr.io/openwrt/sdk:x86_64-$rel" \
+              "debian:trixie-slim" \
               sh /reindex.sh
             do
               rc=$?
