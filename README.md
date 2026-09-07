@@ -174,14 +174,23 @@ keys/stunmesh.pem                     public half of the apk signing key (privat
 
 ## Updating to a new release
 
-Bump that package's `PKG_VERSION`, reset `PKG_RELEASE` to 1, and refresh `PKG_HASH`:
+This repo is step 2 after a stunmesh-go release (step 1 is the upstream
+release itself). The same steps apply to `net/stunmesh-provisioner` after a
+stunmesh-provisioner release.
 
-```sh
-# stunmesh-go
-curl -sL "https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v<ver>" | sha256sum
-# stunmesh-provisioner
-curl -sL "https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v<ver>" | sha256sum
-```
+1. Bump that package's `PKG_VERSION` in `net/<package>/Makefile`.
+2. Reset `PKG_RELEASE` to 1.
+3. Refresh `PKG_HASH`:
+   ```sh
+   # stunmesh-go
+   curl -sL "https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v<ver>" | sha256sum
+   # stunmesh-provisioner
+   curl -sL "https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v<ver>" | sha256sum
+   ```
+4. Commit and push to `main`; CI rebuilds and republishes the feed.
+5. `stunmesh-openwrt-firmware` needs no edit -- it pulls this feed at build
+   time. Trigger its `firmware.yml` via `workflow_dispatch` to rebuild the
+   firmware now, if needed.
 
 Packaging-only changes (init script, config template) bump `PKG_RELEASE`
 instead. Every push to `main` rebuilds and republishes the feed for every
