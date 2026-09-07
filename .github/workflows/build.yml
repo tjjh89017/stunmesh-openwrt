@@ -138,6 +138,24 @@ jobs:
           path: dirbuild/${{ matrix.package }}/
           if-no-files-found: error
 
+  # Single stable check name for branch protection. "build" and "split"
+  # use a dynamic matrix, so their per-cell check names change with the
+  # release/arch/package list and can't be required directly; this job
+  # aggregates both matrices behind the fixed name "Build".
+  build-required:
+    name: Build
+    needs: [build, split]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: All build and split cells passed
+        run: |
+          set -eu
+          if [ "${{ needs.build.result }}" != "success" ] || [ "${{ needs.split.result }}" != "success" ]; then
+            echo "::error::build=${{ needs.build.result }} split=${{ needs.split.result }}"
+            exit 1
+          fi
+
   # Publish every feed directory to GitHub Pages so routers can add
   # https://<owner>.github.io/stunmesh-openwrt/<release>/<arch>/packages.adb
   # as a repository. Only from main, so PR builds never touch the feed.
