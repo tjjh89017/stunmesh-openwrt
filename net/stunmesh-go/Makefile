@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-go
-PKG_VERSION:=1.15.1
+PKG_VERSION:=1.15.2
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=f8402432ddd168c8007343f3634c64eac4b93b5908f7eb4d59b7f22eafcb445e
+PKG_HASH:=7dd727577020db32a8db5d906e2ae26596fda47465a622d7863b68cf30f0d6a3
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
