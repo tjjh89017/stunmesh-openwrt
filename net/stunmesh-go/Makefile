@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-go
-PKG_VERSION:=1.15.3
+PKG_VERSION:=1.16.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-go/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=b49cd1a79a6eec3779325b8ce9e56daad2ae415b6a61c7af8de2efabd030af0d
+PKG_HASH:=2b3193b8c8bf588465b4ed35b363517ae0c93bca68fd8d6e815876da760006a5
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
@@ -22,9 +22,6 @@ PKG_BUILD_FLAGS:=no-mips16
 
 GO_PKG:=github.com/tjjh89017/stunmesh-go
 GO_PKG_BUILD_PKG:=$(GO_PKG)
-# Every built-in storage plugin (cloudflare, opendht) is pure Go and opts in
-# through this tag; the contrib/ out-of-process plugins are not built.
-GO_PKG_TAGS:=builtin_all
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk

@@ -5,12 +5,12 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=stunmesh-provisioner
-PKG_VERSION:=0.7.3
+PKG_VERSION:=0.8.0
 PKG_RELEASE:=1
 
 PKG_SOURCE:=$(PKG_NAME)-$(PKG_VERSION).tar.gz
 PKG_SOURCE_URL:=https://codeload.github.com/tjjh89017/stunmesh-provisioner/tar.gz/v$(PKG_VERSION)?
-PKG_HASH:=93b7fa1388bc109dd266a6c5a6131c5281a7364f67a766f83658a53b4e56fc61
+PKG_HASH:=b3d8e02b159763ce912ee292bcbb95909ddb81867fe816c4d827a725244c5aa5
 
 PKG_MAINTAINER:=Date Huang <tjjh89017@hotmail.com>
 PKG_LICENSE:=LGPL-3.0-or-later
@@ -27,9 +27,6 @@ PKG_BUILD_FLAGS:=no-mips16
 GO_PKG:=github.com/tjjh89017/stunmesh-provisioner
 GO_PKG_BUILD_PKG:=$(GO_PKG)/cmd/stunmesh-agent $(GO_PKG)/cmd/stunmesh-provd
 GO_PKG_LDFLAGS_X:=main.version=$(PKG_VERSION)
-# The agent embeds stunmesh-go's builtin plugins (opendht, cloudflare); they
-# register only when this tag is set.
-GO_PKG_TAGS:=builtin_all
 
 include $(INCLUDE_DIR)/package.mk
 include $(TOPDIR)/feeds/packages/lang/golang/golang-package.mk
